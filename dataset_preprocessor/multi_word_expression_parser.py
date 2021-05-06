@@ -5,7 +5,6 @@ from typing import Optional, Dict, List, Union, Iterator
 import os, sys, io, copy, glob2
 from stanza.server import CoreNLPClient, StartServer
 from stanza.protobuf.CoreNLP_pb2 import Document, Sentence, Token, Span
-import gevent
 import itertools
 import multiprocessing
 
@@ -50,23 +49,38 @@ def parse_serialized_document(doc: Document):
     return lst_ret
 
 
-def _init_annotate_parse(kwargs, doc: str, index: int):
+# def _init_annotate_parse(kwargs, doc: str, index: int):
+#     """
+#     並列処理用のヘルパー関数
+#
+#     @param kwargs: corenlp clientの引数．一部は強制的に上書きされる
+#     @param doc: 処理するdocument．できるだけ大きくするとよい
+#     @param index: プロセス番号(0,1,2,...,n_process)
+#     @return: 処理したドキュメント
+#     """
+#     kwargs["start_server"] = StartServer.TRY_START
+#     kwargs["endpoint"] = f"http://localhost:{9000+index}"
+#     kwargs["output_format"] = "serialized"
+#     kwargs["threads"] = 1
+#     kwargs["be_quiet"] = False
+#
+#     # わざとclientを終了しない．すると2回目以降の呼び出しで既存clientを再利用してくれる
+#     client = CoreNLPClient(**kwargs)
+#     obj_doc = client.annotate(doc)
+#     iter_sentences = parse_serialized_document(obj_doc)
+#     return iter_sentences
+
+
+def _annotate_parse(client: CoreNLPClient, doc: str):
     """
     並列処理用のヘルパー関数
 
-    @param kwargs: corenlp clientの引数．一部は強制的に上書きされる
+    @param client: corenlp clientインスタンス
     @param doc: 処理するdocument．できるだけ大きくするとよい
     @param index: プロセス番号(0,1,2,...,n_process)
     @return: 処理したドキュメント
     """
-    kwargs["start_server"] = StartServer.TRY_START
-    kwargs["endpoint"] = f"http://localhost:{9000+index}"
-    kwargs["output_format"] = "serialized"
-    kwargs["threads"] = 1
-    kwargs["be_quiet"] = False
 
-    # わざとclientを終了しない．すると2回目以降の呼び出しで既存clientを再利用してくれる
-    client = CoreNLPClient(**kwargs)
     obj_doc = client.annotate(doc)
     iter_sentences = parse_serialized_document(obj_doc)
     return iter_sentences
@@ -113,36 +127,39 @@ class CoreNLPTaggerWithMultiWordExpression(object):
         if isinstance(kwargs_corenlp_client, dict):
             _args.update(kwargs_corenlp_client)
 
+
+        self._corenlp = {}
         if threads == 1:
-            self._corenlp = CoreNLPClient(**_args)
+            self._corenlp[0] = CoreNLPClient(**_args)
         else:
             self._pool = multiprocessing.Pool(threads)
-
+            for index in range(threads):
+                _args_i = copy.deepcopy(_args)
+                _args_i["start_server"] = StartServer.TRY_START
+                _args_i["endpoint"] = f"http://localhost:{9000+index}"
+                _args_i["output_format"] = "serialized"
+                _args_i["threads"] = 1
+                self._corenlp[index] = CoreNLPClient(**_args_i)
 
         self._corenlp_properties = _props
         self._corenlp_client_args = _args
         self._threads = threads
 
     def annotate_with_custom_format(self, document: str) -> Iterator[Dict[str, Union[str, int, None, List[int]]]]:
-        assert self._threads == 1, f"when you specify threads > 1, call `annotate_with_custom_format_parallel` method instead."
-
         # annotate with serialized format
-        obj_doc = self._corenlp.annotate(document, output_format="serialized")
+        obj_doc = self._corenlp[0].annotate(document, output_format="serialized")
         return parse_serialized_document(obj_doc)
 
+    # 並列処理
     def annotate_with_custom_format_parallel(self, lst_documents: List[str])-> Iterator[Dict[str, Union[str, int, None, List[int]]]]:
-        iter_process_index = itertools.cycle(range(self._threads))
-        iter_inputs = ((self._corenlp_client_args, document, index) for document, index in zip(lst_documents, iter_process_index))
-        lst_docs = self._pool.starmap(_init_annotate_parse, iter_inputs)
+        iter_clients = itertools.cycle(self._corenlp.values())
+        iter_inputs = ((client, document) for client, document in zip(iter_clients, lst_documents))
+        lst_docs = self._pool.starmap(_annotate_parse, iter_inputs)
         all_sentences = itertools.chain(*lst_docs)
         return all_sentences
 
-    # 事前にinitializeしておく方法
-
-
     def annotate(self, document: str):
-        assert self._threads == 1, f"when you specify threads > 1, call `annotate_with_custom_format_parallel` method instead."
-        return self._corenlp.annotate(document)
+        return self._corenlp[0].annotate(document)
 
 
 # exec stand-alone mode
