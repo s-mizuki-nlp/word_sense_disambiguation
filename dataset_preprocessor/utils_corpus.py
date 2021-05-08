@@ -5,6 +5,8 @@ from torchtext.datasets.wikitext103 import _RawTextIterableDataset
 from datasets.arrow_dataset import Dataset
 import unicodedata
 
+from .utils import strip_tags
+
 def batch_document_generator_for_wikitext_dataset(wikitext_dataset: _RawTextIterableDataset, batchsize: int):
     txt = ""; idx = 0
     for doc in wikitext_dataset:
@@ -24,7 +26,7 @@ def batch_document_generator_for_wikitext_dataset(wikitext_dataset: _RawTextIter
 
 
 def batch_document_generator_for_wiki40b_dataset(wiki40b_dataset: Dataset, batchsize: int, first_paragraph_only: bool,
-                                                 nfkc_normalize: bool = True):
+                                                 nfkc_normalize: bool = True, strip_xml_tag: bool = True):
     txt = ""; idx = 0
     for article in wiki40b_dataset:
         if first_paragraph_only:
@@ -41,6 +43,9 @@ def batch_document_generator_for_wiki40b_dataset(wiki40b_dataset: Dataset, batch
             if nfkc_normalize:
                 # remove invalid unicode characters with NFKC normalization
                 txt = unicodedata.normalize("NFKC", txt)
+            if strip_xml_tag:
+                txt = strip_tags(txt)
+
             yield txt.strip("\n")
             txt = ""
             idx = 0
