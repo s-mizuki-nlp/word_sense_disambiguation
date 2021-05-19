@@ -40,9 +40,10 @@ def batch_document_generator_for_wiki40b_dataset(wiki40b_dataset: Dataset, batch
         idx += 1
 
         if idx >= batchsize:
+            # remove invalid unicode characters with NFKC normalization
             if nfkc_normalize:
-                # remove invalid unicode characters with NFKC normalization
                 txt = unicodedata.normalize("NFKC", txt)
+            # remove xml tags to avoid corenlp analysis error.
             if strip_xml_tag:
                 txt = strip_tags(txt)
 
