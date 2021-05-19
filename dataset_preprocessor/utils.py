@@ -28,6 +28,7 @@ def strip_tags(html):
 
     return s.get_data()
 
+
 def iter_read_pickled_object(path):
     ifs = io.open(path, mode="rb")
     while True:

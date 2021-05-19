@@ -45,6 +45,8 @@ def batch_document_generator_for_wiki40b_dataset(wiki40b_dataset: Dataset, batch
                 txt = unicodedata.normalize("NFKC", txt)
             # remove xml tags to avoid corenlp analysis error.
             if strip_xml_tag:
+                # apply twice to remove nested tag
+                txt = strip_tags(txt)
                 txt = strip_tags(txt)
 
             yield txt.strip("\n")
