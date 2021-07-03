@@ -6,6 +6,7 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
+import nltk
 from nltk.corpus import wordnet as wn
 
 def is_isolated_synset(synset):
@@ -58,3 +59,32 @@ def get_synset_depth(synset, root_synset={"n":wn.synset("entity.n.01"), "v":None
         return ret_empty
     else:
         return (float(np.max(lst_depth)), float(np.min(lst_depth)), float(np.mean(lst_depth)))
+
+
+_MAP_UNIVERSAL_TO_WORDNET = {
+    "NOUN": wn.NOUN,
+    "VERB": wn.VERB,
+    "ADJ": wn.ADJ,
+    "ADV": wn.ADV
+}
+_MAP_PTB_TO_UNIVERSAL = nltk.tagset_mapping("en-ptb", "universal")
+
+def universal_tagset_to_wordnet_tagset(univ_tag, na_value = "o"):
+    """
+    Universal PoS tagset を WordNetの PoS tagset に変換する．
+    @param univ_tag: Universal PoS tag
+    @param na_value: 変換先のWordNet PoS tagがない場合の出力
+    @return:　WordNet PoS tagset. {wn.NOUN, wn.VERB, wn.ADJ, wn.ADV, na_value} のいずれか
+    """
+    wn_tag = _MAP_UNIVERSAL_TO_WORDNET.get(univ_tag, na_value)
+    return wn_tag
+
+def ptb_tagset_to_wordnet_tagset(ptb_tag, na_value = "o"):
+    """
+    Penn TreeBank PoS tagset を WordNetの PoS tagset に変換する．
+    @param ptb_tag: Penn TreeBank PoS tag
+    @param na_value: 変換先のWordNet PoS tagがない場合の出力
+    @return:　WordNet PoS tagset. {wn.NOUN, wn.VERB, wn.ADJ, wn.ADV, na_value} のいずれか
+    """
+    univ_tag = _MAP_PTB_TO_UNIVERSAL[ptb_tag]
+    return universal_tagset_to_wordnet_tagset(univ_tag, na_value)
