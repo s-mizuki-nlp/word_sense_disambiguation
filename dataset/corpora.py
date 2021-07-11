@@ -102,13 +102,14 @@ class NDJSONDataset(IterableDataset):
         iter_records = self._record_loader()
         n_read = 0
         for record in iter_records:
-            # verify the entry is valid or not
-            if self._filter_function is not None:
-                if self._filter_function(record) == True:
-                    continue
-
             # transform each field of the entry
             entry = self._transform(record)
+
+            # verify the entry is valid or not
+            if self._filter_function is not None:
+                if self._filter_function(entry) == True:
+                    continue
+
             yield entry
 
             n_read += 1
