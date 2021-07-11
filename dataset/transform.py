@@ -9,6 +9,9 @@ from typing import Dict, Callable
 import os, sys, io
 import numpy as np
 
+from dataset_preprocessor import utils_wordnet
+
+
 class EmbeddingNormalizer(object):
 
     def __init__(self, field_name_embedding="embedding"):
@@ -57,3 +60,63 @@ class FieldTypeConverter(object):
                 sample[field_name] = converter(sample[field_name])
 
         return sample
+
+
+class ToWordNetPoSTagConverter(object):
+
+    def __init__(self, pos_field_name: str = "pos",
+                 mwe_pos_field_name: str = "mwe_pos"):
+
+        self._pos_field_name = pos_field_name
+        self._mwe_pos_field_name = mwe_pos_field_name
+
+    def __call__(self, lst_tokens):
+
+        # Stanford token PoS tags to WordNet PoS tags.
+        for token in lst_tokens:
+            token[self._pos_field_name] = utils_wordnet.ptb_tagset_to_wordnet_tagset(token[self._pos_field_name])
+            if self._mwe_pos_field_name in token:
+                token[self._mwe_pos_field_name] = utils_wordnet.universal_tagset_to_wordnet_tagset(token[self._mwe_pos_field_name])
+
+        return lst_tokens
+
+class ToWordNetPoSTagAndLemmaConverter(ToWordNetPoSTagConverter):
+
+    def __init__(self,
+                 pos_field_name: str = "pos",
+                 mwe_pos_field_name: str = "mwe_pos",
+                 lemma_field_name: str = "lemma",
+                 mwe_lemma_field_name: str = "mwe_lemma",
+                 lemma_and_pos_field_name: str = "lemma_pos",
+                 mwe_lemma_and_pos_field_name: str = "mwe_lemma_pos",
+                 lowercase: bool = True):
+
+        super().__init__(pos_field_name, mwe_pos_field_name)
+        self._lemma_field_name = lemma_field_name
+        self._mwe_lemma_field_name = mwe_lemma_field_name
+        self._lemma_and_pos_field_name = lemma_and_pos_field_name
+        self._mwe_lemma_and_pos_field_name = mwe_lemma_and_pos_field_name
+        self._lowercase = lowercase
+
+    def __call__(self, lst_tokens):
+        lst_tokens = super().__call__(lst_tokens)
+        if self._lowercase:
+            return self._create_tuple_lowercase(lst_tokens)
+        else:
+            return self._create_tuple(lst_tokens)
+
+    def _create_tuple_lowercase(self, lst_tokens):
+        for token in lst_tokens:
+            token[self._lemma_and_pos_field_name] = (token[self._lemma_field_name].lower(), token[self._pos_field_name])
+            if self._mwe_pos_field_name in token:
+                token[self._mwe_lemma_and_pos_field_name] = (token[self._mwe_lemma_field_name].lower(), token[self._mwe_pos_field_name])
+
+        return lst_tokens
+
+    def _create_tuple(self, lst_tokens):
+        for token in lst_tokens:
+            token[self._lemma_and_pos_field_name] = (token[self._lemma_field_name], token[self._pos_field_name])
+            if self._mwe_pos_field_name in token:
+                token[self._mwe_lemma_and_pos_field_name] = (token[self._mwe_lemma_field_name], token[self._mwe_pos_field_name])
+
+        return lst_tokens
