@@ -5,8 +5,9 @@ from __future__ import unicode_literals
 from __future__ import division
 from __future__ import print_function
 
-from typing import Dict, Callable
-import os, sys, io
+from typing import Dict, Callable, Optional
+from collections import defaultdict
+import os, sys, io, json
 import numpy as np
 
 from dataset_preprocessor import utils_wordnet
@@ -120,3 +121,67 @@ class ToWordNetPoSTagAndLemmaConverter(ToWordNetPoSTagConverter):
                 token[self._mwe_lemma_and_pos_field_name] = (token[self._mwe_lemma_field_name], token[self._mwe_pos_field_name])
 
         return lst_tokens
+
+
+class FrequencyBasedMonosemousEntitySampler(object):
+
+    def __init__(self,
+                 min_freq: Optional[int] = None,
+                 max_freq: Optional[int] = None,
+                 path_monosemous_words_freq: Optional[str] = None,
+                 lemma_lowercase: bool = True
+                 ):
+        """
+        単義語をsamplingする．指定頻度未満の単義語は削除，指定頻度以上の単義語はdown-samplingする．
+
+        @param min_freq: 最小頻度．指定値未満の単義語は削除．
+        @param max_freq: 最大頻度．指定値を上回る単義語は，先頭max_freq個のみ採択，残りは削除．
+        @param path_monosemous_words_freq: 単義語の頻度データ．フォーマットはNDJSON, `{'lemma': 'toddler', 'pos': 'n', 'freq': 2681}`
+
+        @rtype: object
+        """
+
+        if isinstance(min_freq, int):
+            assert path_monosemous_words_freq is not None, f"you must specify `path_monosemous_words_freq` argument."
+            assert os.path.exists(path_monosemous_words_freq), f"specified file does not exist: {path_monosemous_words_freq}"
+
+        self._min_freq = 1 if min_freq is None else min_freq
+        self._max_freq = float("inf") if max_freq is None else max_freq
+        self._lemma_pos_freq = self._load_lemma_pos_freq(path=path_monosemous_words_freq)
+        self._lemma_pos_freq_so_far = defaultdict(int)
+        self._lemma_lowercase = lemma_lowercase
+
+    def _load_lemma_pos_freq(self, path: str):
+        dict_freq = {}
+        ifs = io.open(path, mode="r")
+        for record in ifs:
+            d = json.loads(record.strip())
+            key = (d["lemma"], d["pos"])
+            dict_freq[key] = d["freq"]
+        ifs.close()
+
+        return dict_freq
+
+    def __call__(self, lst_entities: Dict[str, str]):
+        """
+        @param lst_entities: dict like `{'lemma': 'Dubonnet', 'pos': 'n', 'occurence': 0, 'span': [1, 2]}`
+        """
+        lst_ret = []
+        for entity in lst_entities:
+            lemma, pos = entity["lemma"], entity["pos"]
+            if self._lemma_lowercase:
+                lemma = lemma.lower()
+            key = (lemma, pos)
+            self._lemma_pos_freq_so_far[key] += 1
+
+            if self._lemma_pos_freq[key] < self._min_freq:
+                continue
+            if self._lemma_pos_freq_so_far[key] > self._max_freq:
+                continue
+
+            lst_ret.append(entity)
+
+        return lst_ret
+
+    def reset(self):
+        self._lemma_pos_freq_so_far = defaultdict(int)

@@ -99,6 +99,11 @@ class NDJSONDataset(IterableDataset):
         return entry
 
     def __iter__(self):
+        if isinstance(self._transform_functions, dict):
+            for field_name, function in self._transform_functions.items():
+                if hasattr(function, "reset"):
+                    function.reset()
+
         iter_records = self._record_loader()
         n_read = 0
         for record in iter_records:
