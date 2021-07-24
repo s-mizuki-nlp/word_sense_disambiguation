@@ -23,14 +23,14 @@ class DictionaryFilter(object):
         if self._includes is not None:
             for field_name, values in self._includes.items():
                 if sample[field_name] in values:
-                    return True
-            return False
+                    return False
+            return True
 
         if self._excludes is not None:
             for field_name, values in self._excludes.items():
                 if sample[field_name] in values:
-                    return False
-            return True
+                    return True
+            return False
 
 
 class EmptyFilter(object):
@@ -41,8 +41,8 @@ class EmptyFilter(object):
     def __call__(self, sample: Dict[str, str]):
         for field_name in self._check_field_names:
             if len(sample[field_name]) == 0:
-                return False
-        return True
+                return True
+        return False
 
 
 class TokenAttributeFilter(object):
