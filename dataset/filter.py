@@ -32,6 +32,19 @@ class DictionaryFilter(object):
                     return False
             return True
 
+
+class EmptyFilter(object):
+
+    def __init__(self, check_field_names: List[str]):
+        self._check_field_names = check_field_names
+
+    def __call__(self, sample: Dict[str, str]):
+        for field_name in self._check_field_names:
+            if len(sample[field_name]) == 0:
+                return False
+        return True
+
+
 class TokenAttributeFilter(object):
 
     def __init__(self,
