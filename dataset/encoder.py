@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 
-from typing import Dict, Callable, Optional, List, Union, Tuple
+from typing import Dict, Callable, Optional, List, Union, Tuple, Iterable
 from transformers import AutoTokenizer, AutoModel
 from transformers.tokenization_utils_base import BatchEncoding
 import torch
-from collections import defaultdict
-import os, sys, io, json
 import numpy as np
 
+from .utils import preprocessor_for_monosemous_entity_annotated_corpus
+from .utils import numpy_to_tensor, Array_like
 
 class BERTEmbeddings(object):
 
@@ -46,7 +46,7 @@ class BERTEmbeddings(object):
                 shape = (sum(sequence_lengths), hidden_size) if return_compressed_format=True else (batch_size, max(sequence_lengths), hidden_size)
             * `sequence_lengths`: shape (batch_size,). subword sequenceの長さ．
             * `sequence_spans`: shape (batch_size, 2). subword sequenceに対応するspan．return_compressed_format=Trueの場合のみ出力．
-            * `entity_spans`: List[List[List[Tuple(int, int)]]]. sequenceに含まれるentityに対応するsubword span．
+            * `entity_spans`: List[List[List[Tuple[int, int]]]]. sequenceに含まれるentityに対応するsubword span．
                 ひとつのspanが1単語に対応する．複合語entityの場合は複数のspanが返される．
         """
         is_batch_input = True
@@ -105,8 +105,11 @@ class BERTEmbeddings(object):
             embeddings = torch.masked_select(embeddings, mask).reshape(-1, self._hidden_size)
             assert embeddings.shape[0] == v_seq_length.sum(), f"sequence size mismatch detected."
 
+        attention_mask = token_info["attention_mask"]
+
         if self._return_numpy_array:
             embeddings = embeddings.data.numpy()
+            attention_mask = attention_mask.data.numpy()
 
         # return first element if input is not batch.
         if is_batch_input == False:
@@ -120,16 +123,69 @@ class BERTEmbeddings(object):
             "embeddings": embeddings,
             "sequence_lengths": v_seq_length,
             "sequence_spans": v_seq_spans,
-            "entity_spans": lst_lst_entity_subword_spans
+            "entity_spans": lst_lst_entity_subword_spans,
+            "attention_mask": attention_mask
         }
         return dict_ret
 
-    def batch(self, lst_sentence_objects: List[Dict[str, Union[List[str], int, str]]]):
-        lst_lst_words = [sentence_obj["words"] for sentence_obj in lst_sentence_objects]
-        lst_monosemous_entities = [sentence_obj["monosemous_entities"] for sentence_obj in lst_sentence_objects]
-
-    def _batch_to_sentences(self, lst_sentence_objects: List[Dict[str, Union[List[str], int, str]]]):
-        pass
+    def encode_monosemous_entity_annotated_corpus(self, lst_sentence_objects: List[Dict[str, Union[List[str], int, str]]]):
+        it_word_and_entities = zip(*map(preprocessor_for_monosemous_entity_annotated_corpus, lst_sentence_objects))
+        lst_lst_words, lst_lst_entity_spans = list(map(list, it_word_and_entities))
+        lst_monosemous_entities = [record["monosemous_entities"] for record in lst_sentence_objects]
 
 
+def convert_compressed_format_to_batch_format(embeddings: Array_like,
+                                              lst_sequence_lengths: Iterable[int],
+                                              max_sequence_length: Optional[int] = None,
+                                              return_tensor: bool = False):
+    """
+    converts compressed format (\sum{seq_len}, n_dim) into standard format (n_seq, max_seq_len, n_dim)
+
+    @param embeddings: embeddings with compressed format.
+    @param lst_sequence_lengths: list of sequence length.
+    @param max_sequence_length: max. sequence length.
+    """
+    if max_sequence_length is None:
+        max_sequence_length = max(lst_sequence_lengths)
+
+    n_seq = len(lst_sequence_lengths)
+    n_seq_len_sum, n_dim = embeddings.shape
+    assert sum(lst_sequence_lengths) == n_seq_len_sum, \
+        f"total sequence length doesn't match with compressed embeddings dimension size: ({n_seq_len_sum}, {n_dim})"
+
+    # embeddings: (n_seq, max_seq_len, n_dim)
+    shape = (n_seq, max_sequence_length, n_dim)
+    dtype = embeddings.dtype
+    embeddings_decompressed = np.zeros(shape, dtype)
+
+    v_temp = np.cumsum(np.concatenate(([0], lst_sequence_lengths)))
+    lst_seq_spans = [slice(s,t) for s, t in zip(v_temp[:-1], v_temp[1:])]
+
+    for idx, span in enumerate(lst_seq_spans):
+        seq_len = span.stop - span.start
+        embeddings_decompressed[idx, :seq_len, :] = embeddings[span, :]
+
+    # attention_mask: (n_seq, max_seq_len)
+    shape = (n_seq, max_sequence_length)
+    attention_mask = np.zeros(shape, np.int64)
+    for idx, seq_len in enumerate(lst_sequence_lengths):
+        attention_mask[idx, :seq_len] = 1
+
+    if return_tensor:
+        embeddings_decompressed = numpy_to_tensor(embeddings_decompressed)
+        attention_mask = numpy_to_tensor(attention_mask)
+
+    dict_ret = {
+        "embeddings": embeddings_decompressed,
+        "attention_mask": attention_mask
+    }
+    return dict_ret
+
+
+def calc_entity_embeddings_from_subword_embeddings(embeddings: torch.Tensor,
+                                                   lst_lst_entity_subword_spans: List[List[List[Tuple[int, int]]]]):
+    assert embeddings.ndim == 3, f"embeddings dimension must be (n_batch, max_seq_len, n_dim)."
+    assert embeddings.shape[0] == len(lst_lst_entity_subword_spans), f"batch size must be identical to entity subword spans."
+
+    
 
