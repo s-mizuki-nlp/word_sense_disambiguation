@@ -182,10 +182,48 @@ def convert_compressed_format_to_batch_format(embeddings: Array_like,
     return dict_ret
 
 
-def calc_entity_embeddings_from_subword_embeddings(embeddings: torch.Tensor,
-                                                   lst_lst_entity_subword_spans: List[List[List[Tuple[int, int]]]]):
-    assert embeddings.ndim == 3, f"embeddings dimension must be (n_batch, max_seq_len, n_dim)."
-    assert embeddings.shape[0] == len(lst_lst_entity_subword_spans), f"batch size must be identical to entity subword spans."
+def calc_entity_embeddings_from_subword_embeddings(subword_embeddings: torch.Tensor,
+                                                   lst_lst_lst_entity_subword_spans: List[List[List[Tuple[int, int]]]],
+                                                   return_compressed_format: bool = False,
+                                                   max_entity_size: Optional[int] = None):
+    assert subword_embeddings.ndim == 3, f"embeddings dimension must be (n_batch, max_seq_len, n_dim)."
+    assert subword_embeddings.shape[0] == len(lst_lst_lst_entity_subword_spans), f"batch size must be identical to entity subword spans."
 
-    
+    lst_num_entities = list(map(len, lst_lst_lst_entity_subword_spans))
+    n_entities_sum = sum(lst_num_entities)
 
+    # entity_embeddings: (\sum(n_entities), n_dim)
+    n_seq, max_seq_len, n_dim = subword_embeddings.shape
+    shape, dtype = (n_entities_sum, n_dim), subword_embeddings.dtype
+    print(shape)
+    entity_embeddings = torch.zeros(shape, dtype)
+
+    entity_cursor = 0
+    for seq_idx, lst_lst_entity_subword_spans in enumerate(lst_lst_lst_entity_subword_spans):
+        for entity_idx, lst_entity_subword_spans in enumerate(lst_lst_entity_subword_spans):
+            entity_tensor = torch.zeros(n_dim, dtype)
+            n_words = len(lst_entity_subword_spans)
+            for word_idx, entity_subword_spans in enumerate(lst_entity_subword_spans):
+                word_tensor = subword_embeddings[seq_idx, slice(*entity_subword_spans), :].mean(axis=0)
+                entity_tensor = entity_tensor + word_tensor
+            if n_words > 1:
+                entity_tensor = entity_tensor / n_words
+            entity_embeddings[entity_cursor, :] = entity_tensor
+
+            entity_cursor += 1
+
+    if not return_compressed_format:
+        dict_ret = convert_compressed_format_to_batch_format(embeddings=entity_embeddings,
+                                                             lst_sequence_lengths=lst_num_entities,
+                                                             max_sequence_length=max_entity_size,
+                                                             return_tensor=True
+                                                             )
+        dict_ret["num_entities"] = lst_num_entities
+    else:
+        dict_ret = {
+            "embeddings": subword_embeddings,
+            "num_entities": lst_num_entities,
+            "attention_mask": None
+        }
+
+    return dict_ret

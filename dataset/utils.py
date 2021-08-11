@@ -14,7 +14,7 @@ def preprocessor_for_monosemous_entity_annotated_corpus(record: Dict[str, Any]):
     return lst_words, lst_entity_spans
 
 
-def numpy_to_tensor(self, object: Array_like) -> torch.Tensor:
+def numpy_to_tensor(object: Array_like) -> torch.Tensor:
         if isinstance(object, torch.Tensor):
             return object
         elif isinstance(object, np.ndarray):
