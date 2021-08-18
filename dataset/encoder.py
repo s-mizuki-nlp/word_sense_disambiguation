@@ -8,7 +8,7 @@ import torch
 import numpy as np
 
 from .utils import preprocessor_for_monosemous_entity_annotated_corpus
-from .utils import numpy_to_tensor, Array_like
+from .utils import numpy_to_tensor, get_dtype_and_device, Array_like
 
 class BERTEmbeddings(object):
 
@@ -128,11 +128,6 @@ class BERTEmbeddings(object):
         }
         return dict_ret
 
-    def encode_monosemous_entity_annotated_corpus(self, lst_sentence_objects: List[Dict[str, Union[List[str], int, str]]]):
-        it_word_and_entities = zip(*map(preprocessor_for_monosemous_entity_annotated_corpus, lst_sentence_objects))
-        lst_lst_words, lst_lst_entity_spans = list(map(list, it_word_and_entities))
-        lst_monosemous_entities = [record["monosemous_entities"] for record in lst_sentence_objects]
-
 
 def convert_compressed_format_to_batch_format(embeddings: Array_like,
                                               lst_sequence_lengths: Iterable[int],
@@ -145,6 +140,9 @@ def convert_compressed_format_to_batch_format(embeddings: Array_like,
     @param lst_sequence_lengths: list of sequence length.
     @param max_sequence_length: max. sequence length.
     """
+    if torch.is_tensor(embeddings):
+        embeddings = embeddings.data.numpy()
+
     if max_sequence_length is None:
         max_sequence_length = max(lst_sequence_lengths)
 
@@ -191,17 +189,18 @@ def calc_entity_embeddings_from_subword_embeddings(subword_embeddings: torch.Ten
 
     lst_num_entities = list(map(len, lst_lst_lst_entity_subword_spans))
     n_entities_sum = sum(lst_num_entities)
+    max_entity_size = max(lst_num_entities) if max_entity_size is None else max_entity_size
 
     # entity_embeddings: (\sum(n_entities), n_dim)
     n_seq, max_seq_len, n_dim = subword_embeddings.shape
-    shape, dtype = (n_entities_sum, n_dim), subword_embeddings.dtype
-    print(shape)
-    entity_embeddings = torch.zeros(shape, dtype)
+    shape = (n_entities_sum, n_dim)
+    dtype, device = get_dtype_and_device(subword_embeddings)
+    entity_embeddings = torch.zeros(shape, dtype=dtype, device=device)
 
     entity_cursor = 0
     for seq_idx, lst_lst_entity_subword_spans in enumerate(lst_lst_lst_entity_subword_spans):
         for entity_idx, lst_entity_subword_spans in enumerate(lst_lst_entity_subword_spans):
-            entity_tensor = torch.zeros(n_dim, dtype)
+            entity_tensor = torch.zeros(n_dim, dtype=dtype, device=device)
             n_words = len(lst_entity_subword_spans)
             for word_idx, entity_subword_spans in enumerate(lst_entity_subword_spans):
                 word_tensor = subword_embeddings[seq_idx, slice(*entity_subword_spans), :].mean(axis=0)

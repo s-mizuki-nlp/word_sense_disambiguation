@@ -22,3 +22,5 @@ def numpy_to_tensor(object: Array_like) -> torch.Tensor:
         else:
             raise TypeError(f"unsupported type: {type(object)}")
 
+def get_dtype_and_device(t: torch.Tensor):
+    return t.dtype, t.device
