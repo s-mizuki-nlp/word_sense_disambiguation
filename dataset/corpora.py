@@ -12,7 +12,7 @@ class NDJSONDataset(IterableDataset):
     def __init__(self, path: str,
                  binary: bool,
                  transform_functions=None,
-                 filter_function=None,
+                 filter_function: Optional[Union[Callable, List[Callable]]] = None,
                  n_rows: Optional[int] = None,
                  description: str = "",
                  **kwargs_for_json_loads):
@@ -37,7 +37,13 @@ class NDJSONDataset(IterableDataset):
 
         self._description = description
         self._transform_functions = transform_functions
-        self._filter_function = filter_function
+
+        if filter_function is None:
+            self._filter_function = []
+        elif isinstance(filter_function, list):
+            self._filter_function = filter_function
+        elif not isinstance(filter_function, list):
+            self._filter_function = [filter_function]
 
         self._n_rows = n_rows
         self._n_sample = None
@@ -98,6 +104,12 @@ class NDJSONDataset(IterableDataset):
 
         return entry
 
+    def _filter(self, entry: Dict[str, Any]):
+        for filter_function in self._filter_function:
+            if filter_function(entry) == True:
+                return True
+        return False
+
     def __iter__(self):
         if isinstance(self._transform_functions, dict):
             for field_name, function in self._transform_functions.items():
@@ -111,9 +123,8 @@ class NDJSONDataset(IterableDataset):
             entry = self._transform(record)
 
             # verify the entry is valid or not
-            if self._filter_function is not None:
-                if self._filter_function(entry) == True:
-                    continue
+            if self._filter(entry) == True:
+                continue
 
             yield entry
 
