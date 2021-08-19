@@ -16,6 +16,7 @@ class BERTEmbeddings(object):
                  layers: List[int] = [-4,-3,-2,-1],
                  return_compressed_format: bool = True,
                  return_numpy_array: bool = False,
+                 device_ids: Optional[List[int]] = None,
                  **kwargs):
         if isinstance(model_or_name, str):
             self._tokenizer = AutoTokenizer.from_pretrained(model_or_name)
@@ -30,6 +31,31 @@ class BERTEmbeddings(object):
         self._hidden_size = self._model.config.hidden_size
         self._return_compressed_format = return_compressed_format
         self._return_numpy_array = return_numpy_array
+
+        self._device_ids = device_ids
+        if isinstance(device_ids, list):
+            if len(device_ids) == 1:
+                self._device = torch.device(f"cuda:{device_ids[0]}")
+                self._model = self._model.to(self._device)
+            else:
+                self._device = torch.device("cuda")
+                self._model = torch.nn.DataParallel(self._model, device_ids=device_ids).to(self._device)
+        else:
+            self._device = torch.device("cpu")
+
+    def tokenize(self, lst_lst_words, add_special_tokens: bool, **kwargs) -> BatchEncoding:
+
+        # encode word sequences
+        kwargs["padding"] = True
+        kwargs["return_attention_mask"] = True
+        kwargs["return_tensors"] = "pt"
+        token_info = self._tokenizer.batch_encode_plus(lst_lst_words, is_split_into_words=True,
+                                                       add_special_tokens=add_special_tokens,
+                                                       **kwargs)
+        for tensor in token_info.values():
+            tensor.to(self._device)
+
+        return token_info
 
     def __call__(self, lst_lst_words: Union[List[List[str]], List[str]],
                  lst_lst_entity_spans: Union[List[List[Tuple[int, int]]], List[Tuple[int, int]]],
@@ -58,13 +84,8 @@ class BERTEmbeddings(object):
         if len(lst_lst_words) == 1:
             is_batch_input = False
 
-        # encode word sequences
-        kwargs["padding"] = True
-        kwargs["return_attention_mask"] = True
-        kwargs["return_tensors"] = "pt"
-        token_info: BatchEncoding = self._tokenizer.batch_encode_plus(lst_lst_words, is_split_into_words=True,
-                                                       add_special_tokens=add_special_tokens,
-                                                       **kwargs)
+        # tokenize
+        token_info = self.tokenize(lst_lst_words=lst_lst_words, add_special_tokens=add_special_tokens, **kwargs)
 
         # calculate subword-level entity spans
         lst_lst_entity_subword_spans = []
