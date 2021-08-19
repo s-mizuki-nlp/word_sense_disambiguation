@@ -8,7 +8,7 @@ import torch
 import numpy as np
 
 from .utils import preprocessor_for_monosemous_entity_annotated_corpus
-from .utils import numpy_to_tensor, get_dtype_and_device, Array_like
+from .utils import numpy_to_tensor, tensor_to_numpy, get_dtype_and_device, Array_like
 
 class BERTEmbeddings(object):
 
@@ -103,7 +103,7 @@ class BERTEmbeddings(object):
             lst_lst_entity_subword_spans.append(entity_subword_spans)
 
         # calculate sequence length
-        v_seq_length = token_info["attention_mask"].sum(axis=-1).data.numpy()
+        v_seq_length = tensor_to_numpy(token_info["attention_mask"].sum(axis=-1))
         if self._return_compressed_format:
             v_temp = np.cumsum(np.concatenate(([0], v_seq_length)))
             v_seq_spans = np.stack([[s, t] for s, t in zip(v_temp[:-1], v_temp[1:])])
@@ -129,8 +129,8 @@ class BERTEmbeddings(object):
         attention_mask = token_info["attention_mask"]
 
         if self._return_numpy_array:
-            embeddings = embeddings.data.numpy()
-            attention_mask = attention_mask.data.numpy()
+            embeddings = tensor_to_numpy(embeddings)
+            attention_mask = tensor_to_numpy(attention_mask)
 
         # return first element if input is not batch.
         if is_batch_input == False:
@@ -161,8 +161,7 @@ def convert_compressed_format_to_batch_format(embeddings: Array_like,
     @param lst_sequence_lengths: list of sequence length.
     @param max_sequence_length: max. sequence length.
     """
-    if torch.is_tensor(embeddings):
-        embeddings = embeddings.data.numpy()
+    embeddings = tensor_to_numpy(embeddings)
 
     if max_sequence_length is None:
         max_sequence_length = max(lst_sequence_lengths)
