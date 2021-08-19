@@ -82,3 +82,17 @@ class TokenAttributeFilter(object):
                     return True
 
             return False
+
+
+class SequenceLengthFilter(object):
+
+    def __init__(self, check_field_name: str, min_length: Optional[int] = 0, max_length: Optional[int] = float("inf")):
+        self._check_field_name = check_field_name
+        self._min_length = min_length
+        self._max_length = max_length
+
+    def __call__(self, sample: Dict[str, str]):
+        n_length = len(sample[self._check_field_name])
+        if (n_length < self._min_length) or (n_length > self._max_length):
+            return True
+        return False
