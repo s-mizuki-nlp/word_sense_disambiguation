@@ -233,3 +233,20 @@ class WSDEvaluationDataset(Dataset):
             "transform_functions": self._transform_functions
         }
         return ret
+
+
+class EntityLevelWSDEvaluationDataset(WSDEvaluationDataset):
+
+    def _sentence_entity_loader(self):
+        lst_copy_field_names = "corpus_id,document_id,sentence_id,words".split(",")
+        for sentence in self._sentence_loader():
+            for entity in sentence["entities"]:
+                for field_name in lst_copy_field_names:
+                    entity[field_name] = sentence[field_name]
+                    yield entity
+
+    def _record_loader(self):
+        if not hasattr(self, "_records"):
+            self._records = [record for record in self._sentence_entity_loader()]
+
+        return self._records
