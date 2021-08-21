@@ -41,7 +41,7 @@ class BERTEmbeddings(object):
                 self._model = self._model.to(self._device)
             else:
                 self._device = torch.device("cuda")
-                self._model = torch.nn.DataParallel(self._model, device_ids=device_ids).to(self._device)
+                self._model = torch.nn.DataParallel(self._model, device_ids=device_ids, output_device=device_ids[-1]).to(self._device)
         else:
             self._device = torch.device("cpu")
 
