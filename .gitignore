@@ -3,6 +3,7 @@ log/
 jupyter_debug/
 saved_model/
 experiment_results/
+.data/
 
 # IDE
 .idea/
