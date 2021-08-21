@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
-
+import warnings
 from typing import Dict, Callable, Optional, List, Union, Tuple, Iterable
 from transformers import AutoTokenizer, AutoModel
 from transformers.tokenization_utils_base import BatchEncoding
@@ -16,6 +16,7 @@ class BERTEmbeddings(object):
                  layers: List[int] = [-4,-3,-2,-1],
                  return_compressed_format: bool = True,
                  return_numpy_array: bool = False,
+                 ignore_too_long_sequence: bool = True,
                  device_ids: Optional[List[int]] = None,
                  **kwargs):
         if isinstance(model_or_name, str):
@@ -31,6 +32,7 @@ class BERTEmbeddings(object):
         self._hidden_size = self._model.config.hidden_size
         self._return_compressed_format = return_compressed_format
         self._return_numpy_array = return_numpy_array
+        self._ignore_too_long_sequence = ignore_too_long_sequence
 
         self._device_ids = device_ids
         if isinstance(device_ids, list):
@@ -52,8 +54,7 @@ class BERTEmbeddings(object):
         token_info = self._tokenizer.batch_encode_plus(lst_lst_words, is_split_into_words=True,
                                                        add_special_tokens=add_special_tokens,
                                                        **kwargs)
-        for tensor in token_info.values():
-            tensor.to(self._device)
+        _ = token_info.to(self._device)
 
         return token_info
 
@@ -86,6 +87,13 @@ class BERTEmbeddings(object):
 
         # tokenize
         token_info = self.tokenize(lst_lst_words=lst_lst_words, add_special_tokens=add_special_tokens, **kwargs)
+
+        # verify
+        if self._ignore_too_long_sequence:
+            n_seq_len = token_info["input_ids"].shape[-1]
+            if n_seq_len > self._tokenizer.model_max_length:
+                warnings.warn("sequence is too long. skip encoding.")
+                return {}
 
         # calculate subword-level entity spans
         lst_lst_entity_subword_spans = []
