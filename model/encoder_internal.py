@@ -53,7 +53,7 @@ class MultiDenseLayer(nn.Module):
 class StackedLSTMLayer(nn.Module):
 
     def __init__(self, n_dim_in, n_dim_out, n_dim_hidden, n_layer, n_seq_len,
-                 time_distributed: bool = True):
+                 time_distributed: bool = True, bidirectional: bool = False):
         super().__init__()
 
         self._n_dim_in = n_dim_in
@@ -63,11 +63,12 @@ class StackedLSTMLayer(nn.Module):
         self._n_seq_len = n_seq_len
         self._time_distributed = time_distributed
 
-        self._lstm = nn.LSTM(input_size=n_dim_in, hidden_size=n_dim_hidden, num_layers=n_layer, bias=True, batch_first=True, bidirectional=False)
+        self._lstm = nn.LSTM(input_size=n_dim_in, hidden_size=n_dim_hidden, num_layers=n_layer, bias=True, batch_first=True, bidirectional=bidirectional)
+        linear_in_features = n_dim_hidden*2 if bidirectional else n_dim_hidden
         if time_distributed:
-            self._linear = nn.Linear(in_features=n_dim_hidden, out_features=n_dim_out, bias=True)
+            self._linear = nn.Linear(in_features=linear_in_features, out_features=n_dim_out, bias=True)
         else:
-            lst_layers = [nn.Linear(in_features=n_dim_hidden, out_features=n_dim_out, bias=True) for _ in range(n_seq_len)]
+            lst_layers = [nn.Linear(in_features=linear_in_features, out_features=n_dim_out, bias=True) for _ in range(n_seq_len)]
             self._linear = nn.ModuleList(lst_layers)
 
     def _init_bias_to_specific_digit(self, digit: int):

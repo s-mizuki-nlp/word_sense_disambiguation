@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Dict
 
 import torch
 from torch import nn
@@ -272,10 +272,12 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         l_hypo = self.calc_soft_code_length(t_prob_c_y)
         # alpha = probability of hyponymy relation
         alpha = self.calc_ancestor_probability(t_prob_c_x, t_prob_c_y)
+        # beta = probability of identity relation
+        beta = self.calc_synonym_probability(t_prob_c_x, t_prob_c_y)
         # l_lca = length of the lowest common ancestor
         l_lca = self.calc_soft_lowest_common_ancestor_length(t_prob_c_x, t_prob_c_y)
 
-        score = alpha * (l_hypo - l_hyper) + (1. - alpha) * (l_lca - l_hyper)
+        score = alpha * (l_hypo - l_hyper) + (1. - (alpha + beta)) * (l_lca - l_hyper)
 
         return score
 
@@ -313,6 +315,35 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         loss = self._func_distance(y_pred, y_true)
 
         return loss * self._scale
+
+    def calc_synonym_probability(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
+
+        n_digits, n_ary = t_prob_c_x.shape[-2:]
+        dtype, device = self._dtype_and_device(t_prob_c_x)
+
+        # t_p_c_*_zero: (n_batch, n_digits)
+        idx_zero = torch.tensor(0, device=t_prob_c_x.device)
+        t_p_c_x_zero = torch.index_select(t_prob_c_x, dim=-1, index=idx_zero).squeeze()
+        t_p_c_y_zero = torch.index_select(t_prob_c_y, dim=-1, index=idx_zero).squeeze()
+
+        # t_gamma_hat: (n_batch, n_digits)
+        t_gamma_hat = torch.sum(t_prob_c_x*t_prob_c_y, dim=-1) - t_p_c_x_zero*t_p_c_y_zero
+        # prepend 1.0 at the beginning
+        # pad_shape: (n_batch, 1)
+        pad_shape = t_gamma_hat.shape[:-1] + (1,)
+        t_pad_ones = torch.ones(pad_shape, dtype=dtype, device=device)
+        # t_gamma: (n_batch, n_digits+1)
+        t_gamma = torch.cat((t_pad_ones, t_gamma_hat), dim=-1)
+
+        # t_delta: (n_batch, n_digits)
+        t_delta_hat = t_p_c_x_zero*t_p_c_y_zero
+        # append 1.0 at the end.
+        t_delta = torch.cat((t_delta_hat, t_pad_ones), dim=-1)
+
+        # t_prob: (n_batch)
+        t_prob = torch.sum(t_delta*torch.cumprod(t_gamma, dim=-1), dim=-1)
+
+        return t_prob
 
 
 class LowestCommonAncestorLengthPredictionLoss(HyponymyScoreLoss):
@@ -352,18 +383,24 @@ class LowestCommonAncestorLengthPredictionLoss(HyponymyScoreLoss):
 
 class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
-    def __init__(self, scale: float = 1.0, size_average=None, reduce=None, reduction='mean') -> None:
+    def __init__(self, scale: float = 1.0, size_average=None, reduce=None, reduction='mean',
+                 loss_metric: str = "cross_entropy", focal_loss_gamma: float = 1.0, focal_loss_normalize_weight: bool = False) -> None:
 
         super(EntailmentProbabilityLoss, self).__init__(scale=scale,
                     distance_metric="binary-cross-entropy",
                     size_average=size_average, reduce=reduce, reduction=reduction)
+        accepted_loss_metric = ("cross_entropy", "focal_loss", "dice_loss")
+        assert loss_metric in accepted_loss_metric, f"`loss_metric` must be one of these: {','.join(accepted_loss_metric)}"
+        self._loss_metric = loss_metric
+        self._focal_loss_gamma = focal_loss_gamma
+        self._focal_loss_normalize_weight = focal_loss_normalize_weight
 
     def forward(self, t_prob_c_batch: torch.Tensor, lst_hyponymy_tuple: List[Tuple[int, int, float]]) -> torch.Tensor:
         """
         evaluates loss of the predicted hyponymy score and true hyponymy score.
 
         :param t_prob_c_batch: probability array. shape: (n_batch, n_digits, n_ary), t_prob_c_batch[b,n,m] = p(c_n=m|x_b)
-        :param lst_hyponymy_tuple: list of (hypernym index, hyponym index, hyponymy(=1.0) or not(=0.0)) tuples
+        :param lst_hyponymy_tuple: list of (hypernym index, hyponym index, hyponymy score) tuples
         """
 
         # x: hypernym, y: hyponym
@@ -374,13 +411,48 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
         t_idx_x = torch.tensor([tup[0] for tup in lst_hyponymy_tuple], dtype=torch.long, device=device)
         t_idx_y = torch.tensor([tup[1] for tup in lst_hyponymy_tuple], dtype=torch.long, device=device)
-        y_true = torch.tensor([tup[2] for tup in lst_hyponymy_tuple], dtype=dtype, device=device)
+        y_hyponymy_score = torch.tensor([tup[2] for tup in lst_hyponymy_tuple], dtype=dtype, device=device)
 
         t_prob_c_x = torch.index_select(t_prob_c_batch, dim=0, index=t_idx_x)
         t_prob_c_y = torch.index_select(t_prob_c_batch, dim=0, index=t_idx_y)
 
-        y_pred = self.calc_ancestor_probability(t_prob_c_x, t_prob_c_y)
+        y_prob_entail = self.calc_ancestor_probability(t_prob_c_x, t_prob_c_y)
+        y_prob_synonym = self.calc_synonym_probability(t_prob_c_x, t_prob_c_y)
+        y_prob_other = 1.0 - (y_prob_entail+y_prob_synonym)
 
-        loss = self._func_distance(y_pred, y_true)
+        # clamp values so that it won't produce nan value.
+        y_prob_entail = torch.clamp(y_prob_entail, min=1E-5, max=(1.0-1E-5))
+        y_prob_synonym = torch.clamp(y_prob_synonym, min=1E-5, max=(1.0-1E-5))
+        y_prob_other = torch.clamp(y_prob_other, min=1E-5, max=(1.0-1E-5))
+
+        # pick up the probability based on the ground-truth class: {}.
+        y_probs = (y_hyponymy_score >= 1.0).float() * y_prob_entail + \
+                  (y_hyponymy_score == 0.0).float() * y_prob_synonym + \
+                  (y_hyponymy_score <= -1.0).float() * y_prob_other
+
+        if self._loss_metric == "cross_entropy": # cross-entropy loss
+            y_weights = torch.ones_like(y_probs, dtype=dtype)
+            loss_i = -1.0 * y_weights * torch.log(y_probs)
+
+        elif self._loss_metric == "focal_loss": # focal loss
+            y_weights = (1.0 - y_probs)**self._focal_loss_gamma
+            if self._focal_loss_normalize_weight:
+                y_weights = len(y_probs) * y_weights / torch.sum(y_weights)
+            loss_i = -1.0 * y_weights * torch.log(y_probs)
+
+        elif self._loss_metric == "dice_loss": # dice loss [Li+, 2020]
+            gamma = 1.0
+            adjusted_y_probs = ((1.0 - y_probs)**self._focal_loss_gamma) * y_probs
+            loss_i = 1.0 - (2. * adjusted_y_probs + gamma) / (adjusted_y_probs + 1 + gamma)
+        else:
+            raise NotImplementedError(f"unknown loss metric: {self._loss_metric}")
+
+        # reduction
+        if self.reduction == "sum":
+            loss = torch.sum(loss_i)
+        elif self.reduction.endswith("mean"):
+            loss = torch.mean(loss_i)
+        elif self.reduction == "none":
+            loss = loss_i
 
         return loss * self._scale

@@ -6,14 +6,19 @@ from __future__ import division
 from __future__ import print_function
 
 from typing import Optional, Dict, Callable
+import warnings
 from collections import defaultdict
 import pickle
 import numpy as np
 import torch
+from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
+from torch.utils.data._utils.collate import default_collate
 from torch.nn.modules.loss import _Loss
 from torch.optim import Adam
 import pytorch_lightning as pl
+
+from sam.sam import SAM
 
 from model.autoencoder import MaskedAutoEncoder
 from model.loss_unsupervised import ReconstructionLoss
@@ -32,6 +37,7 @@ class UnsupervisedTrainer(pl.LightningModule):
                  learning_rate: Optional[float] = 0.001,
                  model_parameter_schedulers: Optional[Dict[str, Callable[[float], float]]] = None,
                  loss_parameter_schedulers: Optional[Dict[str, Dict[str, Callable[[float], float]]]] = None,
+                 optimizer_class: Optional[Optimizer] = None
                  ):
 
         super(UnsupervisedTrainer, self).__init__()
@@ -50,6 +56,7 @@ class UnsupervisedTrainer(pl.LightningModule):
             "val": dataloader_val,
             "test": dataloader_test
         }
+        self._optimizer_class = optimizer_class
         # auxiliary function that is solely used for validation
         self._auxiliary = HyponymyScoreLoss()
 
@@ -71,19 +78,35 @@ class UnsupervisedTrainer(pl.LightningModule):
         return (next(self._model.parameters())).device
 
     def configure_optimizers(self):
-        opt = Adam(self.parameters(), lr=self._learning_rate)
+        if self._optimizer_class is None:
+            opt = Adam(self.parameters(), lr=self._learning_rate)
+        elif self._optimizer_class.__name__ == "SAM":
+            opt = self._optimizer_class(self.parameters(), Adam, lr=self._learning_rate)
+        else:
+            opt = self._optimizer_class(params=self.parameters(), lr=self._learning_rate)
         return opt
+
+    def _asssign_null_collate_function(self, dataloader: Optional[DataLoader]):
+        if dataloader is None:
+            return dataloader
+        if (dataloader.collate_fn is None) or (dataloader.collate_fn is default_collate):
+            warnings.warn("update collate_fn with null function.")
+            dataloader.collate_fn = lambda v:v
+        return dataloader
 
     @pl.data_loader
     def tng_dataloader(self):
+        self._dataloaders["train"] = self._asssign_null_collate_function(self._dataloaders["train"])
         return self._dataloaders["train"]
 
     @pl.data_loader
     def val_dataloader(self):
+        self._dataloaders["val"] = self._asssign_null_collate_function(self._dataloaders["val"])
         return self._dataloaders["val"]
 
     @pl.data_loader
     def test_dataloader(self):
+        self._dataloaders["test"] = self._asssign_null_collate_function(self._dataloaders["test"])
         return self._dataloaders["test"]
 
     def forward(self, x):
@@ -95,8 +118,11 @@ class UnsupervisedTrainer(pl.LightningModule):
         self._update_model_parameters(current_step, verbose=False)
         self._update_loss_parameters(current_step, verbose=False)
 
+        if isinstance(data_batch, list):
+            data_batch = data_batch[0]
+
         # forward computation
-        t_x = data_batch["embedding"]
+        t_x = torch.tensor(data_batch["embedding"], dtype=torch.float32, device=self._get_model_device()).squeeze(dim=0)
         t_latent_code, t_code_prob, t_x_dash = self._model.forward(t_x)
 
         # (required) reconstruction loss
@@ -133,7 +159,7 @@ class UnsupervisedTrainer(pl.LightningModule):
     def validation_step(self, data_batch, batch_nb):
 
         # forward computation without back-propagation
-        t_x = data_batch["embedding"]
+        t_x = torch.tensor(data_batch[0]["embedding"], dtype=torch.float32, device=self._get_model_device()).squeeze(dim=0)
         t_intermediate, t_code_prob, t_x_dash = self._model._predict(t_x)
 
         loss_reconst = self._loss_reconst.forward(t_x_dash, t_x)
@@ -179,7 +205,7 @@ class UnsupervisedTrainer(pl.LightningModule):
             _ = self._model.to(device=device)
 
     @classmethod
-    def load_model_from_checkpoint(self, weights_path: str, on_gpu, map_location=None):
+    def load_model_from_checkpoint(cls, weights_path: str, on_gpu: bool, map_location=None, fix_model_missing_attributes: bool = True):
         if on_gpu:
             if map_location is not None:
                 checkpoint = torch.load(weights_path, map_location=map_location)
@@ -193,6 +219,29 @@ class UnsupervisedTrainer(pl.LightningModule):
             model = model.cuda(device=map_location)
         state_dict = {key.replace("_model.", ""):param for key, param in checkpoint["state_dict"].items()}
         model.load_state_dict(state_dict)
+
+        # fix model attributes for backward compatibility.
+        if fix_model_missing_attributes:
+            model = cls.fix_missing_attributes(model)
+
+        return model
+
+    @classmethod
+    def fix_missing_attributes(cls, model):
+        # fix for #9f6ec90, #fbf51f8, #d882d6f, #cd01f68, #d4f59fa
+        if getattr(model._encoder, "internal_layer_class_type", None) is None:
+            if model._encoder.__class__.__name__ == "AutoRegressiveLSTMEncoder":
+                if not hasattr(model._encoder, "_input_transformation"):
+                    setattr(model._encoder, "_input_transformation", "time_distributed")
+                if not hasattr(model._encoder, "_prob_zero_monotone_increasing"):
+                    setattr(model._encoder, "_prob_zero_monotone_increasing", False)
+                if not hasattr(model._encoder, "_output_embedding"):
+                    setattr(model._encoder, "_output_embedding", "time_distributed")
+            elif model._encoder.__class__.__name__ == "TransformerEncoder":
+                if not hasattr(model._encoder, "_prob_zero_monotone_increasing"):
+                    setattr(model._encoder, "_prob_zero_monotone_increasing", False)
+            else:
+                model._encoder._internal_layer_class_type = model._encoder.lst_h_to_z[0].__class__.__name__
 
         return model
 
@@ -258,13 +307,15 @@ class SupervisedTrainer(UnsupervisedTrainer):
                  dataloader_val: Optional[DataLoader] = None,
                  dataloader_test: Optional[DataLoader] = None,
                  learning_rate: Optional[float] = 0.001,
+                 optimizer_class: Optional[Optimizer] = None,
                  use_intermediate_representation: bool = False,
                  model_parameter_schedulers: Optional[Dict[str, Callable[[float], float]]] = None,
                  loss_parameter_schedulers: Optional[Dict[str, Callable[[float], float]]] = None,
+                 shuffle_hyponymy_dataset_on_every_epoch: bool = True
                  ):
 
         super().__init__(model, loss_reconst, loss_mutual_info, dataloader_train, dataloader_val, dataloader_test, learning_rate,
-                         model_parameter_schedulers, loss_parameter_schedulers)
+                         model_parameter_schedulers, loss_parameter_schedulers, optimizer_class)
 
         self._use_intermediate_representation = use_intermediate_representation
         self._loss_hyponymy = loss_hyponymy
@@ -272,8 +323,10 @@ class SupervisedTrainer(UnsupervisedTrainer):
         self._loss_code_length = loss_code_length
 
         self._scale_loss_hyponymy = loss_hyponymy.scale
-        self._scale_loss_non_hyponymy = loss_non_hyponymy.scale if loss_non_hyponymy is not None else 1.
+        self._scale_loss_non_hyponymy = loss_non_hyponymy.scale if loss_non_hyponymy is not None else loss_hyponymy.scale
         self._scale_loss_code_length = loss_code_length.scale if loss_code_length is not None else 1.
+
+        self._shuffle_hyponymy_dataset_on_every_epoch = shuffle_hyponymy_dataset_on_every_epoch
 
     def training_step(self, data_batch, batch_nb):
 
@@ -281,8 +334,11 @@ class SupervisedTrainer(UnsupervisedTrainer):
         self._update_model_parameters(current_step, verbose=False)
         self._update_loss_parameters(current_step, verbose=False)
 
+        if isinstance(data_batch, list):
+            data_batch = data_batch[0]
+
         # forward computation
-        t_x = data_batch["embedding"]
+        t_x = torch.tensor(data_batch["embedding"], dtype=torch.float32, device=self._get_model_device()).squeeze(dim=0)
 
         # DEBUG
         # return {"loss":torch.tensor(0.0, requires_grad=True), "log":{}}
@@ -336,8 +392,11 @@ class SupervisedTrainer(UnsupervisedTrainer):
 
     def validation_step(self, data_batch, batch_nb):
 
+        if isinstance(data_batch, list):
+            data_batch = data_batch[0]
+
         # forward computation without back-propagation
-        t_x = data_batch["embedding"]
+        t_x = torch.tensor(data_batch["embedding"], dtype=torch.float32, device=self._get_model_device()).squeeze(dim=0)
         t_latent_code, t_code_prob, t_x_dash = self._model._predict(t_x)
 
         # (required) reconstruction loss
@@ -357,17 +416,24 @@ class SupervisedTrainer(UnsupervisedTrainer):
         if self._loss_non_hyponymy is not None:
             lst_tup_non_hyponymy = data_batch["non_hyponymy_relation"]
             loss_non_hyponymy = self._loss_non_hyponymy(code_repr, lst_tup_non_hyponymy)
+            loss_hyponymy_positive = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device)
         else:
-            loss_non_hyponymy = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device)
             cache = self._loss_hyponymy.reduction
             self._loss_hyponymy.reduction = "none"
             lst_loss_hyponymy = self._loss_hyponymy(code_repr, lst_tup_hyponymy)
             self._loss_hyponymy.reduction = cache
             n_sample = len(lst_tup_hyponymy)
+            loss_non_hyponymy = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device); n_non_hyponymy = 0
+            loss_hyponymy_positive = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device); n_hyponymy_positive = 0
             for l, (u, v, distance) in zip(lst_loss_hyponymy, lst_tup_hyponymy):
-                if distance < 0:
-                    loss_non_hyponymy += (l / n_sample)
-                    loss_hyponymy -= (l / n_sample)
+                if distance <= 0:
+                    loss_non_hyponymy += l
+                    n_non_hyponymy += 1
+                else:
+                    loss_hyponymy_positive += l
+                    n_hyponymy_positive += 1
+            loss_non_hyponymy = loss_non_hyponymy / n_non_hyponymy
+            loss_hyponymy_positive = loss_hyponymy_positive / n_hyponymy_positive
 
         # (optional) code length loss
         if self._loss_code_length is not None:
@@ -385,10 +451,11 @@ class SupervisedTrainer(UnsupervisedTrainer):
         loss = loss_reconst + loss_hyponymy + loss_non_hyponymy + loss_code_length + loss_mi
 
         metrics = {
-            "val_loss_reconst": loss_reconst,
+            "val_loss_reconst": loss_reconst / self._scale_loss_reconst,
             "val_loss_mutual_info": loss_mi / self._scale_loss_mi,
             "val_loss_hyponymy": loss_hyponymy / self._scale_loss_hyponymy,
             "val_loss_non_hyponymy": loss_non_hyponymy / self._scale_loss_non_hyponymy,
+            "val_loss_hyponymy_positive": loss_hyponymy_positive / self._scale_loss_hyponymy, # self._scale_loss_non_hyponymy,
             "val_loss_code_length": loss_code_length / self._scale_loss_code_length,
             "val_loss": loss
         }
@@ -398,4 +465,38 @@ class SupervisedTrainer(UnsupervisedTrainer):
         return {"val_loss":loss, "log":metrics}
 
     def on_epoch_start(self):
-        self.train_dataloader().dataset.shuffle_hyponymy_dataset()
+        if self._shuffle_hyponymy_dataset_on_every_epoch:
+            self.train_dataloader().dataset.shuffle_hyponymy_dataset()
+
+
+class SupervisedTrainerSAM(SupervisedTrainer):
+
+    def on_sanity_check_start(self):
+        self.configure_optimizers()
+
+    def training_step(self, data_batch, batch_nb):
+        optimizer = self.optimizers[0]
+        assert isinstance(optimizer, SAM), "optimizer must be SAM optimizer class."
+
+        random_seed = np.random.randint(np.iinfo(np.int32).max)
+
+        # first forward-backward pass
+        torch.manual_seed(random_seed)
+        dict_loss = super().training_step(data_batch, batch_nb)
+        dict_loss["loss"].backward()
+        optimizer.first_step(zero_grad=True)
+
+        # second forward-backward pass
+        torch.manual_seed(random_seed)
+        dict_loss = super().training_step(data_batch, batch_nb)
+        dict_loss["loss"].backward()
+        optimizer.second_step(zero_grad=True)
+
+        return dict_loss
+
+    def optimizer_step(self, epoch_nb, batch_nb, optimizer, optimizer_i, second_order_closure=None):
+        # do nothing
+        pass
+
+    def backward(self, use_amp, loss, optimizer):
+        pass
