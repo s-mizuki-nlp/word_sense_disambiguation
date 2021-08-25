@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 from __future__ import division
 from __future__ import print_function
 
-from typing import Dict, Callable, Optional, List
+from typing import Dict, Callable, Optional, List, Tuple
 from collections import defaultdict, Counter
 import os, sys, io, json
 import numpy as np
@@ -148,7 +148,7 @@ class FrequencyBasedMonosemousEntitySampler(object):
                 assert os.path.exists(path_monosemous_words_freq), f"specified file does not exist: {path_monosemous_words_freq}"
                 self._lemma_pos_freq = self._load_lemma_pos_freq(path=path_monosemous_words_freq)
             elif dataset_monosemous_entity_annotated_corpus is not None:
-                print("counting lemma x pos frequency.")
+                print("counting lemma x pos frequency from dataset.")
                 self._lemma_pos_freq = self._count_lemma_pos_freq(dataset=dataset_monosemous_entity_annotated_corpus,
                                                                   lemma_lowercase=lemma_lowercase)
             else:
@@ -207,5 +207,34 @@ class FrequencyBasedMonosemousEntitySampler(object):
 
         return lst_ret
 
+    def __getitem__(self, lemma_pos: Tuple[str, str]):
+        key = self._lemma_pos_to_key(lemma_pos[0], lemma_pos[1], self._lemma_lowercase)
+        return self._lemma_pos_freq[key]
+
+    def _export_num_of_valid_lemma_pos(self):
+        dict_cnt = defaultdict(int)
+        for (lemma, pos), freq in self._lemma_pos_freq.items():
+            if freq >= self._min_freq:
+                dict_cnt[pos] += 1
+        return dict_cnt
+
+    def _export_freq_of_valid_lemma_pos(self):
+        dict_cnt = defaultdict(int)
+        for (lemma, pos), freq in self._lemma_pos_freq.items():
+            if freq >= self._min_freq:
+                dict_cnt[pos] += min(self._max_freq, freq)
+        return dict_cnt
+
     def reset(self):
         self._lemma_pos_freq_so_far = defaultdict(int)
+
+    def verbose(self):
+        ret = {
+            "min_freq": self._min_freq,
+            "max_freq": self._max_freq,
+            "lemma_lowercase": self._lemma_lowercase,
+            "n_total_lemma_and_pos_vocab": len(self._lemma_pos_freq),
+            "n_valid_lemma_and_pos_vocab": self._export_num_of_valid_lemma_pos(),
+            "n_valid_lemma_and_pos_freq": self._export_freq_of_valid_lemma_pos()
+        }
+        return ret
