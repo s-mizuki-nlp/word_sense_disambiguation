@@ -5,10 +5,11 @@ from __future__ import unicode_literals
 from __future__ import division
 from __future__ import print_function
 
-from typing import Dict, Callable, Optional
-from collections import defaultdict
+from typing import Dict, Callable, Optional, List
+from collections import defaultdict, Counter
 import os, sys, io, json
 import numpy as np
+from torch.utils.data import Dataset
 
 from dataset_preprocessor import utils_wordnet
 
@@ -129,6 +130,7 @@ class FrequencyBasedMonosemousEntitySampler(object):
                  min_freq: Optional[int] = None,
                  max_freq: Optional[int] = None,
                  path_monosemous_words_freq: Optional[str] = None,
+                 dataset_monosemous_entity_annotated_corpus: Optional[Dataset] = None,
                  lemma_lowercase: bool = True
                  ):
         """
@@ -142,12 +144,21 @@ class FrequencyBasedMonosemousEntitySampler(object):
         """
 
         if isinstance(min_freq, int):
-            assert path_monosemous_words_freq is not None, f"you must specify `path_monosemous_words_freq` argument."
-            assert os.path.exists(path_monosemous_words_freq), f"specified file does not exist: {path_monosemous_words_freq}"
+            if path_monosemous_words_freq is not None:
+                assert os.path.exists(path_monosemous_words_freq), f"specified file does not exist: {path_monosemous_words_freq}"
+                self._lemma_pos_freq = self._load_lemma_pos_freq(path=path_monosemous_words_freq)
+            elif dataset_monosemous_entity_annotated_corpus is not None:
+                print("counting lemma x pos frequency.")
+                self._lemma_pos_freq = self._count_lemma_pos_freq(dataset=dataset_monosemous_entity_annotated_corpus,
+                                                                  lemma_lowercase=lemma_lowercase)
+            else:
+                raise AssertionError(f"you must specify either `path_monosemous_words_freq` or `dataset_monosemous_entity_annotated_corpus`.")
+        else:
+            # it always returns zero.
+            self._lemma_pos_freq = defaultdict(int)
 
-        self._min_freq = 1 if min_freq is None else min_freq
+        self._min_freq = 0 if min_freq is None else min_freq
         self._max_freq = float("inf") if max_freq is None else max_freq
-        self._lemma_pos_freq = self._load_lemma_pos_freq(path=path_monosemous_words_freq)
         self._lemma_pos_freq_so_far = defaultdict(int)
         self._lemma_lowercase = lemma_lowercase
 
@@ -162,21 +173,34 @@ class FrequencyBasedMonosemousEntitySampler(object):
 
         return dict_freq
 
-    def __call__(self, lst_entities: Dict[str, str]):
+    @classmethod
+    def _lemma_pos_to_key(cls, lemma: str, pos: str, lemma_lowercase: bool, **kwargs):
+        if lemma_lowercase:
+            return (lemma.lower(), pos)
+        else:
+            return (lemma, pos)
+
+    @classmethod
+    def _count_lemma_pos_freq(cls, dataset: Dataset, lemma_lowercase: bool):
+        cnt = Counter()
+        for record in dataset:
+            lst_lemma_pos = [cls._lemma_pos_to_key(lemma_lowercase=lemma_lowercase, **entity) for entity in record["monosemous_entities"]]
+            cnt.update(lst_lemma_pos)
+
+        return cnt
+
+    def __call__(self, lst_entities: List[Dict[str, str]]):
         """
-        @param lst_entities: dict like `{'lemma': 'Dubonnet', 'pos': 'n', 'occurence': 0, 'span': [1, 2]}`
+        @param lst_entities: list of dict like `[{'lemma': 'Dubonnet', 'pos': 'n', 'occurence': 0, 'span': [1, 2]}]`
         """
         lst_ret = []
         for entity in lst_entities:
-            lemma, pos = entity["lemma"], entity["pos"]
-            if self._lemma_lowercase:
-                lemma = lemma.lower()
-            key = (lemma, pos)
-            self._lemma_pos_freq_so_far[key] += 1
+            lemma_pos = self._lemma_pos_to_key(lemma_lowercase=self._lemma_lowercase, **entity)
+            self._lemma_pos_freq_so_far[lemma_pos] += 1
 
-            if self._lemma_pos_freq[key] < self._min_freq:
+            if self._lemma_pos_freq[lemma_pos] < self._min_freq:
                 continue
-            if self._lemma_pos_freq_so_far[key] > self._max_freq:
+            if self._lemma_pos_freq_so_far[lemma_pos] > self._max_freq:
                 continue
 
             lst_ret.append(entity)
