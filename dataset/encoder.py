@@ -161,7 +161,7 @@ class BERTEmbeddings(object):
 def convert_compressed_format_to_batch_format(embeddings: Array_like,
                                               lst_sequence_lengths: Iterable[int],
                                               max_sequence_length: Optional[int] = None,
-                                              return_tensor: bool = False):
+                                              return_tensor: bool = False) -> Dict[str, Array_like]:
     """
     converts compressed format (\sum{seq_len}, n_dim) into standard format (n_seq, max_seq_len, n_dim)
 
