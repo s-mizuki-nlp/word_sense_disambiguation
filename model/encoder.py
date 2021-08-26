@@ -86,8 +86,9 @@ class LSTMEncoder(SimpleEncoder):
                  n_dim_emb_code: Optional[int] = None,
                  teacher_forcing: bool = True,
                  discretizer: Optional[nn.Module] = None,
-                 global_attention: Optional[str] = None,
-                 code_embeddings: str = "time_distributed",
+                 global_attention_type: Optional[str] = None,
+                 code_embeddings_type: str = "time_distributed",
+                 trainable_beginning_of_code: bool = True,
                  prob_zero_monotone_increasing: bool = False,
                  dtype=torch.float32,
                  **kwargs):
@@ -103,9 +104,10 @@ class LSTMEncoder(SimpleEncoder):
         self._n_ary = n_ary
         self._dtype = dtype
         self._n_ary_internal = None
-        self._global_attention = global_attention
+        self._global_attention_type = global_attention_type
         self._teacher_forcing = teacher_forcing
-        self._code_embeddings = code_embeddings
+        self._code_embeddings_type = code_embeddings_type
+        self._trainable_beginning_of_code = trainable_beginning_of_code
         self._prob_zero_monotone_increasing = prob_zero_monotone_increasing
 
         self._build()
@@ -116,29 +118,34 @@ class LSTMEncoder(SimpleEncoder):
         self._lstm_cell = nn.LSTMCell(input_size=self._n_dim_emb+self._n_dim_emb_code, hidden_size=self._n_dim_hidden, bias=True)
 
         # y_t -> e_{t+1}; t=0,1,...,N_d-2
-        if self._code_embeddings == "time_distributed": # e_t = Embed(o_t;\theta)
-            self._embedding_code = nn.Linear(in_features=self._n_ary, out_features=self._n_dim_emb_code, bias=False)
-        elif self._code_embeddings == "time_dependent": # e_t = Embed(o_t;\theta_t)
-            lst_layers = [nn.Linear(in_features=self._n_ary, out_features=self._n_dim_emb_code, bias=False) for _ in range(self._n_digits-1)]
+        if self._trainable_beginning_of_code:
+            # reserve last index as the embedding of the beginning of code (BOC).
+            n_codes = self._n_ary + 1
+        else:
+            n_codes = self._n_ary
+        if self._code_embeddings_type == "time_distributed": # e_t = Embed(o_t;\theta)
+            self._embedding_code = nn.Linear(in_features=n_codes, out_features=self._n_dim_emb_code, bias=False)
+        elif self._code_embeddings_type == "time_dependent": # e_t = Embed(o_t;\theta_t)
+            lst_layers = [nn.Linear(in_features=n_codes, out_features=self._n_dim_emb_code, bias=False) for _ in range(self._n_digits-1)]
             self._embedding_code = nn.ModuleList(lst_layers)
         else:
-            raise AssertionError(f"unknown `code_embeddings` value: {self._code_embeddings}")
+            raise AssertionError(f"unknown `code_embeddings_type` value: {self._code_embeddings_type}")
 
         # h_t -> a_t
-        if self._global_attention is None:
-            self._attention = None
+        if self._global_attention_type is None:
+            self._global_attention = None
         else:
-            if self._global_attention == "none":
-                self._attention = None
-            if self._global_attention in ("dot", "general", "mlp"):
+            if self._global_attention_type == "none":
+                self._global_attention = None
+            if self._global_attention_type in ("dot", "general", "mlp"):
                 assert self._n_dim_emb == self._n_dim_hidden, \
                     f"dimension of input embeddings and hidden layer must be same: {self._n_dim_emb} != {self._n_dim_hidden}"
-                self._attention = GlobalAttention(dim=self._n_dim_hidden, attn_type=self._global_attention)
+                self._global_attention = GlobalAttention(dim=self._n_dim_hidden, attn_type=self._global_attention_type)
             else:
-                raise AssertionError(f"unknown `global_attention` value: {self._global_attention}")
+                raise AssertionError(f"unknown `global_attention_type` value: {self._global_attention_type}")
 
         # [h_t;a_t] or h_t -> z_t
-        if self._attention is not None: # z_t = FF([h_t;a_t];\theta)
+        if self._global_attention is not None: # z_t = FF([h_t;a_t];\theta)
             self._h_to_z = nn.Linear(in_features=self._n_dim_hidden*2, out_features=self._n_ary, bias=True)
         else: # z_t = FF(h_t;\theta_t)
             self._h_to_z = nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary, bias=True)
@@ -146,16 +153,24 @@ class LSTMEncoder(SimpleEncoder):
     def _dtype_and_device(self, t: torch.Tensor):
         return t.dtype, t.device
 
-    def _init_state_zero(self, n_batch: int, dtype, device):
-        h_t = torch.zeros((n_batch, self._n_dim_hidden), dtype=dtype, device=device)
-        c_t = torch.zeros((n_batch, self._n_dim_hidden), dtype=dtype, device=device)
-        e_t = torch.zeros((n_batch, self._n_dim_emb_code), dtype=dtype, device=device)
+    def _init_states(self, n_batch: int, dtype, device):
+        h_0 = torch.zeros((n_batch, self._n_dim_hidden), dtype=dtype, device=device)
+        c_0 = torch.zeros((n_batch, self._n_dim_hidden), dtype=dtype, device=device)
 
-        return h_t, c_t, e_t
+        if self._trainable_beginning_of_code:
+            t_idx_boc = torch.full(size=(n_batch,), fill_value=self._n_ary, device=device)
+            if self._code_embeddings_type == "time_distributed":
+                e_0 = self._embedding_code(F.one_hot(t_idx_boc))
+            elif self._code_embeddings_type == "time_dependent":
+                e_0 = self._embedding_code[0](F.one_hot(t_idx_boc))
+        else:
+            e_0 = torch.zeros((n_batch, self._n_dim_emb_code), dtype=dtype, device=device)
+
+        return h_0, c_0, e_0
 
     def forward(self, input_x: torch.Tensor, input_y: torch.Tensor = None,
-                init_states: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
                 context_embeddings: Optional[torch.Tensor] = None,
+                init_states: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
                 on_inference: bool = False):
         """
 
@@ -172,7 +187,7 @@ class LSTMEncoder(SimpleEncoder):
         # initialize variables
         lst_prob_c = []
         lst_latent_code = []
-        h_d, c_d, e_d = self._init_state_zero(n_batch, dtype, device)
+        h_d, c_d, e_d = self._init_states(n_batch, dtype, device)
         if init_states is not None:
             h_d, c_d = init_states[0], init_states[1]
 
@@ -183,10 +198,10 @@ class LSTMEncoder(SimpleEncoder):
             h_d, c_d = self._lstm_cell(input, (h_d, c_d))
 
             # compute Pr{c_d=d|c_{<d}} = softmax( FF([h_t;a_t]) )
-            if isinstance(self._attention, GlobalAttention):
+            if isinstance(self._global_attention, GlobalAttention):
                 src = h_d.unsqueeze(1)
                 context_lengths = (context_embeddings.sum(dim=-1) != 0.0).type(torch.long).sum(dim=-1)
-                a_d = self._attention.forward(source=src, memory_bank=context_embeddings, memory_lengths=context_lengths)
+                a_d = self._global_attention.forward(source=src, memory_bank=context_embeddings, memory_lengths=context_lengths)
                 h_and_a_d = torch.cat([h_d, a_d], dim=-1)
                 t_z_d_dash = self._h_to_z(h_and_a_d)
             else:
@@ -224,9 +239,9 @@ class LSTMEncoder(SimpleEncoder):
                     o_d = t_latent_code_d.detach()
 
                 # calculate embeddings
-                if self._code_embeddings == "time_distributed":
+                if self._code_embeddings_type == "time_distributed":
                     e_d = self._embedding_code(o_d)
-                elif self._code_embeddings == "time_dependent":
+                elif self._code_embeddings_type == "time_dependent":
                     e_d = self._embedding_code[d](o_d)
                 else:
                     e_d = None
@@ -271,6 +286,7 @@ class LSTMEncoder(SimpleEncoder):
     @property
     def n_dim_hidden(self):
         return self._n_dim_hidden
+
 
 class TransformerEncoder(SimpleEncoder):
 
