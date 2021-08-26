@@ -256,47 +256,41 @@ def calc_entity_embeddings_from_subword_embeddings(subword_embeddings: torch.Ten
     return dict_ret
 
 
-def extract_entity_subword_embeddings(subword_embeddings: torch.Tensor,
+def extract_entity_subword_embeddings(context_embeddings: Array_like,
+                                      lst_lst_entity_subword_spans: List[List[Tuple[int, int]]],
+                                      max_window_size: Optional[int] = None) -> Dict[str, Array_like]:
+    is_input_tensor = torch.is_tensor(context_embeddings)
+    context_embeddings = tensor_to_numpy(context_embeddings)
+    assert context_embeddings.ndim == 2, f"`context_embeddings` dimension must be (max_seq_len, n_dim)."
+
+    # extract entity subword embeddings as (n_subwords, n_dim)
+    lst_entity_subword_embeddings = []
+    for lst_entity_subword_spans in lst_lst_entity_subword_spans:
+        start = lst_entity_subword_spans[0][0]
+        stop = lst_entity_subword_spans[-1][1]
+        entity_subword_embeddings = context_embeddings[start:stop, :]
+        lst_entity_subword_embeddings.append(entity_subword_embeddings)
+
+    # calculate sequence length
+    lst_entity_subword_sequence_lengths = [embeddings.shape[0] for embeddings in lst_entity_subword_embeddings]
+
+    # convert list of 2d arrays whose dimensions are unequal into a 3d array.
+    compressed_entity_embeddings = np.vstack(lst_entity_subword_embeddings)
+    dict_ret = convert_compressed_format_to_batch_format(embeddings=compressed_entity_embeddings,
+                                                         lst_sequence_lengths=lst_entity_subword_sequence_lengths,
+                                                         max_sequence_length=max_window_size)
+
+    dict_ret["sequence_lengths"] = np.array(lst_entity_subword_sequence_lengths)
+
+    if is_input_tensor:
+        for field_name in dict_ret.keys():
+            dict_ret[field_name] = torch.tensor(dict_ret[field_name])
+
+    return dict_ret
+
+
+def extract_entity_subword_embeddings_batch(subword_embeddings: torch.Tensor,
                                       lst_lst_lst_entity_subword_spans: List[List[List[Tuple[int, int]]]],
                                       pad_to_max_window_size: bool = False,
                                       max_window_size: Optional[int] = None) -> Dict[str, List[List[torch.Tensor]]]:
-    assert subword_embeddings.ndim == 3, f"embeddings dimension must be (n_batch, max_seq_len, n_dim)."
-    assert subword_embeddings.shape[0] == len(lst_lst_lst_entity_subword_spans), f"batch size must be identical to entity subword spans."
-
-    # extract entity subword embeddings as (n_subwords, n_dim)
-    lst_lst_entity_subword_embeddings = []
-    lst_lst_entity_subword_sequence_lengths = []
-    n_subwords_max = 1
-    for seq_idx, lst_lst_entity_subword_spans in enumerate(lst_lst_lst_entity_subword_spans):
-        lst_entity_subword_embeddings = []
-        lst_entity_subword_sequence_lengths = []
-        for lst_entity_subword_spans in lst_lst_entity_subword_spans:
-            start = lst_entity_subword_spans[0][0]
-            stop = lst_entity_subword_spans[-1][1]
-            n_subwords = stop - start
-            entity_subword_embeddings = subword_embeddings[seq_idx, start:stop, :]
-            lst_entity_subword_embeddings.append(entity_subword_embeddings)
-            n_subwords_max = max(n_subwords_max, n_subwords)
-            lst_entity_subword_sequence_lengths.append(n_subwords)
-
-        lst_lst_entity_subword_embeddings.append(lst_entity_subword_embeddings)
-        lst_lst_entity_subword_sequence_lengths.append(lst_entity_subword_sequence_lengths)
-
-    # apply padding so that the shapes of every entity subword embeddings are identical to (max_window_size, n_dim).
-    if pad_to_max_window_size:
-        max_window_size = n_subwords_max if max_window_size is None else max_window_size
-        assert max_window_size >= n_subwords_max, f"`max_window_size` is smaller than actual max windows size."
-        for seq_idx in range(len(lst_lst_entity_subword_embeddings)):
-            for entity_idx in range(len(lst_lst_entity_subword_embeddings[seq_idx])):
-                embeddings = lst_lst_entity_subword_embeddings[seq_idx][entity_idx]
-                # (n_subwords, n_dim) -> (max_window_size, n_dim)
-                n_pad = max_window_size - embeddings.shape[0]
-                how_to_pad = (0,0,0,n_pad) # pad at the bottom of 2-d shaped tensor.
-                pad_function = torch.nn.ZeroPad2d(how_to_pad)
-                lst_lst_entity_subword_embeddings[seq_idx][entity_idx] = pad_function(embeddings)
-
-    dict_ret = {
-        "lst_lst_entity_subword_embeddings": lst_lst_entity_subword_embeddings,
-        "lst_lst_entity_subword_sequence_lengths": lst_lst_entity_subword_sequence_lengths
-    }
-    return dict_ret
+    pass
