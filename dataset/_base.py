@@ -11,7 +11,7 @@ from torch.utils.data import IterableDataset
 from dataset_preprocessor import utils
 
 
-class AbstractFormatDataset(IterableDataset, metaclass=ABCMeta):
+class AbstractFormatDataset(metaclass=ABCMeta):
 
     def __init__(self, path: str,
                  transform_functions=None,
