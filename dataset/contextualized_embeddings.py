@@ -5,11 +5,12 @@ from typing import Optional, Union, Callable, List, Any, Dict
 import json
 import h5py
 
+from torch.utils.data import IterableDataset
 from ._base import AbstractFormatDataset
 from .encoder import convert_compressed_format_to_batch_format
 
 
-class BERTEmbeddingsBatchDataset(AbstractFormatDataset):
+class BERTEmbeddingsBatchDataset(AbstractFormatDataset, IterableDataset):
 
     def __init__(self,
                  path: str,

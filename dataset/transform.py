@@ -12,6 +12,7 @@ import numpy as np
 from torch.utils.data import Dataset
 
 from dataset_preprocessor import utils_wordnet
+from .utils import lemma_pos_to_tuple
 
 
 class EmbeddingNormalizer(object):
@@ -174,17 +175,10 @@ class FrequencyBasedMonosemousEntitySampler(object):
         return dict_freq
 
     @classmethod
-    def _lemma_pos_to_key(cls, lemma: str, pos: str, lemma_lowercase: bool, **kwargs):
-        if lemma_lowercase:
-            return (lemma.lower(), pos)
-        else:
-            return (lemma, pos)
-
-    @classmethod
     def _count_lemma_pos_freq(cls, dataset: Dataset, lemma_lowercase: bool):
         cnt = Counter()
         for record in dataset:
-            lst_lemma_pos = [cls._lemma_pos_to_key(lemma_lowercase=lemma_lowercase, **entity) for entity in record["monosemous_entities"]]
+            lst_lemma_pos = [lemma_pos_to_tuple(lemma_lowercase=lemma_lowercase, **entity) for entity in record["monosemous_entities"]]
             cnt.update(lst_lemma_pos)
 
         return cnt
@@ -195,7 +189,7 @@ class FrequencyBasedMonosemousEntitySampler(object):
         """
         lst_ret = []
         for entity in lst_entities:
-            lemma_pos = self._lemma_pos_to_key(lemma_lowercase=self._lemma_lowercase, **entity)
+            lemma_pos = lemma_pos_to_tuple(lemma_lowercase=self._lemma_lowercase, **entity)
             self._lemma_pos_freq_so_far[lemma_pos] += 1
 
             if self._lemma_pos_freq[lemma_pos] < self._min_freq:
@@ -208,7 +202,7 @@ class FrequencyBasedMonosemousEntitySampler(object):
         return lst_ret
 
     def __getitem__(self, lemma_pos: Tuple[str, str]):
-        key = self._lemma_pos_to_key(lemma_pos[0], lemma_pos[1], self._lemma_lowercase)
+        key = lemma_pos_to_tuple(lemma_pos[0], lemma_pos[1], self._lemma_lowercase)
         return self._lemma_pos_freq[key]
 
     def _export_num_of_valid_lemma_pos(self):

@@ -30,7 +30,11 @@ def tensor_to_numpy(object: Array_like) -> torch.Tensor:
         else:
             raise TypeError(f"unsupported type: {type(object)}")
 
-
-
 def get_dtype_and_device(t: torch.Tensor):
     return t.dtype, t.device
+
+def lemma_pos_to_tuple(lemma: str, pos: str, lemma_lowercase: bool, **kwargs):
+    if lemma_lowercase:
+        return (lemma.lower(), pos)
+    else:
+        return (lemma, pos)
