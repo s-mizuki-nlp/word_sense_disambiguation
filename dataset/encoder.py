@@ -7,7 +7,7 @@ from transformers.tokenization_utils_base import BatchEncoding
 import torch
 import numpy as np
 
-from .utils import preprocessor_for_monosemous_entity_annotated_corpus
+from .utils import pad_trailing_tensors
 from .utils import numpy_to_tensor, tensor_to_numpy, get_dtype_and_device, Array_like
 
 class BERTEmbeddings(object):
@@ -158,10 +158,45 @@ class BERTEmbeddings(object):
         return dict_ret
 
 
+def convert_compressed_format_to_list_of_tensors(embeddings: Array_like,
+                                                 lst_sequence_lengths: Iterable[int],
+                                                 padding: bool = False,
+                                                 max_sequence_length: Optional[int] = None
+                                                 ) -> List[torch.Tensor]:
+    """
+    converts compressed format (\sum{seq_len}, n_dim) into the list of tensors [(n_len_0, n_dim), (n_len_1, n_dim), ...]
+
+    @param embeddings: embeddings with compressed format.
+    @param lst_sequence_lengths: list of sequence length.
+    @param padding: pad with zero-valued tensor to maximum sequence length or not.
+    @param max_sequence_length: explicit max. sequence length. DEFAULT: max(lst_sequence_lengths)
+    """
+    embeddings = numpy_to_tensor(embeddings)
+
+    if max_sequence_length is None:
+        max_sequence_length = max(lst_sequence_lengths)
+
+    n_seq_len_sum, n_dim = embeddings.shape
+    assert sum(lst_sequence_lengths) == n_seq_len_sum, \
+        f"total sequence length doesn't match with compressed embeddings dimension size: ({n_seq_len_sum}, {n_dim})"
+
+    # lst_embeddings: [(max_seq_len, n_dim)]*n_seq
+    v_temp = np.cumsum(np.concatenate(([0], lst_sequence_lengths)))
+    lst_seq_spans = [slice(s,t) for s, t in zip(v_temp[:-1], v_temp[1:])]
+
+    # extract spans from compressed-view embedding.
+    lst_embeddings = [embeddings[span,:] for span in lst_seq_spans]
+
+    # pad tensors if we need
+    if padding:
+        lst_embeddings = list(map(lambda emb_t: pad_trailing_tensors(emb_t, max_sequence_length), lst_embeddings))
+
+    return lst_embeddings
+
 def convert_compressed_format_to_batch_format(embeddings: Array_like,
                                               lst_sequence_lengths: Iterable[int],
-                                              max_sequence_length: Optional[int] = None,
-                                              return_tensor: bool = False) -> Dict[str, Array_like]:
+                                              max_sequence_length: Optional[int] = None
+                                              ) -> Dict[str, torch.Tensor]:
     """
     converts compressed format (\sum{seq_len}, n_dim) into standard format (n_seq, max_seq_len, n_dim)
 
@@ -169,37 +204,21 @@ def convert_compressed_format_to_batch_format(embeddings: Array_like,
     @param lst_sequence_lengths: list of sequence length.
     @param max_sequence_length: max. sequence length.
     """
-    embeddings = tensor_to_numpy(embeddings)
-
+    n_seq = len(lst_sequence_lengths)
     if max_sequence_length is None:
         max_sequence_length = max(lst_sequence_lengths)
 
-    n_seq = len(lst_sequence_lengths)
-    n_seq_len_sum, n_dim = embeddings.shape
-    assert sum(lst_sequence_lengths) == n_seq_len_sum, \
-        f"total sequence length doesn't match with compressed embeddings dimension size: ({n_seq_len_sum}, {n_dim})"
-
-    # embeddings: (n_seq, max_seq_len, n_dim)
-    shape = (n_seq, max_sequence_length, n_dim)
-    dtype = embeddings.dtype
-    embeddings_decompressed = np.zeros(shape, dtype)
-
-    v_temp = np.cumsum(np.concatenate(([0], lst_sequence_lengths)))
-    lst_seq_spans = [slice(s,t) for s, t in zip(v_temp[:-1], v_temp[1:])]
-
-    for idx, span in enumerate(lst_seq_spans):
-        seq_len = span.stop - span.start
-        embeddings_decompressed[idx, :seq_len, :] = embeddings[span, :]
+    # compressed -> list of padded format -> stack
+    lst_padded_embeddings = convert_compressed_format_to_list_of_tensors(embeddings, lst_sequence_lengths, padding=True,
+                                                                         max_sequence_length=max_sequence_length)
+    embeddings_decompressed = torch.stack(lst_padded_embeddings, dim=0)
 
     # attention_mask: (n_seq, max_seq_len)
     shape = (n_seq, max_sequence_length)
     attention_mask = np.zeros(shape, np.int64)
     for idx, seq_len in enumerate(lst_sequence_lengths):
         attention_mask[idx, :seq_len] = 1
-
-    if return_tensor:
-        embeddings_decompressed = numpy_to_tensor(embeddings_decompressed)
-        attention_mask = numpy_to_tensor(attention_mask)
+    attention_mask = numpy_to_tensor(attention_mask)
 
     dict_ret = {
         "embeddings": embeddings_decompressed,
@@ -207,88 +226,65 @@ def convert_compressed_format_to_batch_format(embeddings: Array_like,
     }
     return dict_ret
 
+def calc_entity_subwords_average_vectors(context_embeddings: Array_like,
+                                         lst_lst_entity_subword_spans: List[List[Tuple[int, int]]]
+                                         ) -> List[torch.Tensor]:
+    context_embeddings = numpy_to_tensor(context_embeddings)
+    assert context_embeddings.ndim == 2, f"embeddings dimension must be (n_seq_len, n_dim)."
 
-def calc_entity_embeddings_from_subword_embeddings(subword_embeddings: torch.Tensor,
-                                                   lst_lst_lst_entity_subword_spans: List[List[List[Tuple[int, int]]]],
-                                                   return_compressed_format: bool = False,
-                                                   max_entity_size: Optional[int] = None):
-    assert subword_embeddings.ndim == 3, f"embeddings dimension must be (n_batch, max_seq_len, n_dim)."
-    assert subword_embeddings.shape[0] == len(lst_lst_lst_entity_subword_spans), f"batch size must be identical to entity subword spans."
+    # entity_embeddings: List[torch.tensor(n_window, n_dim)]
+    lst_entity_vectors = []
+    for entity_idx, lst_entity_subword_spans in enumerate(lst_lst_entity_subword_spans):
+        # take average at word level, then take average at entity level.
+        lst_word_vectors = [context_embeddings[slice(*subword_span), :].mean(dim=0) for subword_span in lst_entity_subword_spans]
+        entity_vector = torch.stack(lst_word_vectors).mean(dim=0)
+        lst_entity_vectors.append(entity_vector)
 
-    lst_num_entities = list(map(len, lst_lst_lst_entity_subword_spans))
-    n_entities_sum = sum(lst_num_entities)
-    max_entity_size = max(lst_num_entities) if max_entity_size is None else max_entity_size
-
-    # entity_embeddings: (\sum(n_entities), n_dim)
-    n_seq, max_seq_len, n_dim = subword_embeddings.shape
-    shape = (n_entities_sum, n_dim)
-    dtype, device = get_dtype_and_device(subword_embeddings)
-    entity_embeddings = torch.zeros(shape, dtype=dtype, device=device)
-
-    entity_cursor = 0
-    for seq_idx, lst_lst_entity_subword_spans in enumerate(lst_lst_lst_entity_subword_spans):
-        for entity_idx, lst_entity_subword_spans in enumerate(lst_lst_entity_subword_spans):
-            entity_tensor = torch.zeros(n_dim, dtype=dtype, device=device)
-            n_words = len(lst_entity_subword_spans)
-            for word_idx, entity_subword_spans in enumerate(lst_entity_subword_spans):
-                word_tensor = subword_embeddings[seq_idx, slice(*entity_subword_spans), :].mean(axis=0)
-                entity_tensor = entity_tensor + word_tensor
-            if n_words > 1:
-                entity_tensor = entity_tensor / n_words
-            entity_embeddings[entity_cursor, :] = entity_tensor
-
-            entity_cursor += 1
-
-    if not return_compressed_format:
-        dict_ret = convert_compressed_format_to_batch_format(embeddings=entity_embeddings,
-                                                             lst_sequence_lengths=lst_num_entities,
-                                                             max_sequence_length=max_entity_size,
-                                                             return_tensor=True
-                                                             )
-        dict_ret["num_entities"] = lst_num_entities
-    else:
-        dict_ret = {
-            "embeddings": subword_embeddings,
-            "num_entities": lst_num_entities,
-            "attention_mask": None
-        }
-
-    return dict_ret
-
+    return lst_entity_vectors
 
 def extract_entity_subword_embeddings(context_embeddings: Array_like,
                                       lst_lst_entity_subword_spans: List[List[Tuple[int, int]]],
-                                      max_window_size: Optional[int] = None) -> Dict[str, Array_like]:
+                                      padding: bool = False,
+                                      max_entity_subword_length: Optional[int] = None) -> Dict[str, Array_like]:
+    """
+    extracts entity spans from context embeddings and returns as the list of tensors.
+
+    @param context_embeddings: sequence of subword embeddings of a sentence. shape: (n_subwords, n_dim)
+    @param lst_lst_entity_subword_spans: list of the list of entity subword spans in a sentence.
+    @param padding: pad entity subword span or not. DEFAULT: False
+    @param max_entity_subword_length: max. width of the entity span.
+    @return: dictionary. embeddings: List[(n_window, n_dim)], sequence_lengths: List[n_window]
+    """
     is_input_tensor = torch.is_tensor(context_embeddings)
-    context_embeddings = tensor_to_numpy(context_embeddings)
     assert context_embeddings.ndim == 2, f"`context_embeddings` dimension must be (max_seq_len, n_dim)."
 
-    # extract entity subword embeddings as (n_subwords, n_dim)
-    lst_entity_subword_embeddings = []
+    # extract entity subword embeddings as List[(n_subwords, n_dim)]
+    lst_embeddings = []
     for lst_entity_subword_spans in lst_lst_entity_subword_spans:
         start = lst_entity_subword_spans[0][0]
         stop = lst_entity_subword_spans[-1][1]
         entity_subword_embeddings = context_embeddings[start:stop, :]
-        lst_entity_subword_embeddings.append(entity_subword_embeddings)
+        lst_embeddings.append(entity_subword_embeddings)
 
     # calculate sequence length
-    lst_entity_subword_sequence_lengths = [embeddings.shape[0] for embeddings in lst_entity_subword_embeddings]
+    lst_sequence_lengths = [embeddings.shape[0] for embeddings in lst_embeddings]
 
-    # convert list of 2d arrays whose dimensions are unequal into a 3d array.
-    compressed_entity_embeddings = np.vstack(lst_entity_subword_embeddings)
-    dict_ret = convert_compressed_format_to_batch_format(embeddings=compressed_entity_embeddings,
-                                                         lst_sequence_lengths=lst_entity_subword_sequence_lengths,
-                                                         max_sequence_length=max_window_size)
+    # apply padding
+    if padding:
+        n_window_max = max(lst_sequence_lengths)
+        max_entity_subword_length = n_window_max if max_entity_subword_length is None else max_entity_subword_length
+        lst_embeddings = list(map(lambda emb_t: pad_trailing_tensors(emb_t, max_entity_subword_length), lst_embeddings))
 
-    dict_ret["sequence_lengths"] = np.array(lst_entity_subword_sequence_lengths)
-
-    if is_input_tensor:
-        for field_name in dict_ret.keys():
-            dict_ret[field_name] = torch.tensor(dict_ret[field_name])
+    # store them
+    dict_ret = {
+        "embeddings": lst_embeddings,
+        "sequence_lengths": torch.tensor(lst_sequence_lengths) if is_input_tensor else np.array(lst_sequence_lengths)
+    }
 
     return dict_ret
 
 
+# not yet implemented.
 def extract_entity_subword_embeddings_batch(subword_embeddings: torch.Tensor,
                                       lst_lst_lst_entity_subword_spans: List[List[List[Tuple[int, int]]]],
                                       pad_to_max_window_size: bool = False,
