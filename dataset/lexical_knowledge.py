@@ -51,9 +51,21 @@ class LemmaDataset(NDJSONDataset, Dataset):
         key = lemma_pos_to_tuple(lemma_pos[0], lemma_pos[1], self._lemma_lowercase)
         return self._lexical_knowledge[key]
 
+    def __contains__(self, lemma_pos: Tuple[str, str]):
+        key = lemma_pos_to_tuple(lemma_pos[0], lemma_pos[1], self._lemma_lowercase)
+        return key in self._lexical_knowledge
+
     def get_synset_codes(self, lemma: str, pos: str):
         record = self[(lemma, pos)]
         return record["synset_codes"]
+
+    def get_synset_ids(self, lemma: str, pos: str):
+        record = self[(lemma, pos)]
+        return record["synset_ids"]
+
+    def is_monosemous(self, lemma: str, pos: str):
+        record = self[(lemma, pos)]
+        return record["is_monosemous"]
 
     @property
     def synset_code_n_digits(self):
@@ -153,4 +165,4 @@ class SynsetDataset(NDJSONDataset, Dataset):
                 synset_id = parent_synset["id"]
 
     def get_synset_code(self, synset_id: str):
-        return synset_id
+        return self[synset_id]["code"]
