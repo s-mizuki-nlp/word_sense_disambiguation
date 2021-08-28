@@ -38,3 +38,22 @@ def lemma_pos_to_tuple(lemma: str, pos: str, lemma_lowercase: bool, **kwargs):
         return (lemma.lower(), pos)
     else:
         return (lemma, pos)
+
+def pad_trailing_tensors(embeddings: torch.Tensor, n_length_after_padding: int):
+    """
+    pad fixed-valued tensor at the training (=bottom in 2D) of a given tensor to obtain desired vector sequence length.
+
+    @param embeddings: 2D or 3D tensor. shape: ([n_batch], n_sequence, n_dim)
+    @param n_length_after_padding: sequence length (=height in 2D) after padding.
+    """
+    dim = -2 # second last axis. it must be the sequence dimension.
+
+    n_length = embeddings.shape[dim]
+    if n_length_after_padding < n_length:
+        raise ValueError(f"`n_length_after_padding` must be longer than current length: {n_length} < {n_length_after_padding}")
+
+    n_pad = n_length_after_padding - n_length
+    padding_function = torch.nn.ZeroPad2d(padding=(0,0,0,n_pad))
+    embeddings_padded = padding_function(embeddings)
+
+    return embeddings_padded
