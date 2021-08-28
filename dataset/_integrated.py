@@ -1,18 +1,15 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 import warnings
-from typing import Set, Optional, Dict, Any, Iterator, Union
+from typing import Set, Optional, Dict, Any, Iterator, Union, List
+
+import torch
+
 from .contextualized_embeddings import BERTEmbeddingsDataset
 from .lexical_knowledge import LemmaDataset, SynsetDataset
 
 from torch.utils.data import IterableDataset
 from .encoder import extract_entity_subword_embeddings, calc_entity_subwords_average_vectors
-
-
-class CustomCollateFunction():
-
-    def __init__(self):
-        pass
 
 
 class WSDTaskDataset(IterableDataset):
@@ -174,3 +171,22 @@ class WSDTaskDataset(IterableDataset):
     @property
     def embeddings_dataset(self):
         return self._bert_embeddings
+
+
+class WSDTaskDatasetCollateFunction(object):
+
+    def __init__(self):
+        pass
+
+    def __call__(self, lst_entity_objects: List[Dict[str, Any]]):
+        def _list_of(field_name: str):
+            return [obj[field_name] for obj in lst_entity_objects]
+
+        lst_context_sequence_lengths = _list_of("context_sequence_length")
+        lst_padded_context_embeddings = _list_of("context_embedding")
+
+        dict_ret = {
+            "sequence_lengths": torch.tensor(lst_context_sequence_lengths)
+        }
+
+        return dict_ret
