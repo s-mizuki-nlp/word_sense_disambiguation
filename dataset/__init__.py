@@ -1,4 +1,4 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 
-from ._integrated import TrainingDataset
+from ._integrated import WSDTaskDataset

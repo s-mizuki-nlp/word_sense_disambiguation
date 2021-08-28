@@ -7,7 +7,7 @@ import unittest
 from nltk.corpus import wordnet as wn
 from bs4 import BeautifulSoup
 
-from dataset.wsd import WSDEvaluationDataset
+from dataset.evaluation import WSDEvaluationDataset
 from config_files.evaluation_datasets import word_sense_disambiguation
 
 
