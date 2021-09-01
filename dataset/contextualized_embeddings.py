@@ -70,4 +70,8 @@ class BERTEmbeddingsDataset(BERTEmbeddingsBatchDataset):
                 }
                 yield dict_record
 
-
+    @property
+    def n_dim(self):
+        record = next(iter(self))
+        t = record["embedding"]
+        return t.shape[-1]
