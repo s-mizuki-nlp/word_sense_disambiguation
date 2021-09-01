@@ -10,7 +10,7 @@ from .lexical_knowledge import LemmaDataset, SynsetDataset
 
 from torch.utils.data import IterableDataset
 from .encoder import extract_entity_subword_embeddings, calc_entity_subwords_average_vectors
-
+from . import utils
 
 class WSDTaskDataset(IterableDataset):
 
@@ -175,18 +175,57 @@ class WSDTaskDataset(IterableDataset):
 
 class WSDTaskDatasetCollateFunction(object):
 
-    def __init__(self):
-        pass
+    def __init__(self,
+                 require_entity_context_attn_mask: bool = False,
+                 require_global_attn_mask: bool = True,
+                 num_heads_entity_context_mha: Optional[int] = None):
+
+        self._require_entity_context_attn_mask = require_entity_context_attn_mask
+        self._require_global_attn_mask = require_global_attn_mask
+
+        if require_entity_context_attn_mask:
+            assert isinstance(num_heads_entity_context_mha, int), \
+                f"you must specify the number of attention heads of MHA module as: `num_heads_entity_context_mha`"
+        self._num_heads = num_heads_entity_context_mha
 
     def __call__(self, lst_entity_objects: List[Dict[str, Any]]):
         def _list_of(field_name: str):
             return [obj[field_name] for obj in lst_entity_objects]
 
-        lst_context_sequence_lengths = _list_of("context_sequence_length")
-        lst_padded_context_embeddings = _list_of("context_embedding")
+        set_field_names = next(iter(lst_entity_objects)).keys()
 
+        # context embeddings and entity embeddings
+        lst_context_sequence_lengths = _list_of("context_sequence_length")
+        lst_lagged_context_embeddings = _list_of("context_embedding")
+        lst_entity_sequence_lengths = _list_of("entity_sequence_length")
+        lst_lagged_entity_span_embeddings = _list_of("entity_embedding")
         dict_ret = {
-            "sequence_lengths": torch.tensor(lst_context_sequence_lengths)
+            "context_sequence_lengths": torch.tensor(lst_context_sequence_lengths),
+            "context_embeddings": utils.pad_and_stack_list_of_tensors(lst_lagged_context_embeddings),
+            "entity_sequence_lengths": torch.tensor(lst_entity_sequence_lengths),
+            "entity_embeddings": utils.pad_and_stack_list_of_tensors(lst_lagged_entity_span_embeddings)
         }
+        ## (optional) entity span average vectors
+        if "entity_span_avg_vector" in set_field_names:
+            dict_ret["entity_span_avg_vectors"] = torch.stack(_list_of("entity_span_avg_vector"))
+
+        # attention masks used for MultiheadAttention and GlobalAttention module.
+        _, device = utils.get_dtype_and_device(dict_ret["context_embeddings"])
+        dict_ret["entity_sequence_mask"] = utils.create_sequence_mask(lst_entity_sequence_lengths, device=device)
+        dict_ret["context_sequence_mask"] = utils.create_sequence_mask(lst_context_sequence_lengths, device=device)
+
+        ## (optional) attn_mask for MultiheadAttention module.
+        if self._require_entity_context_attn_mask:
+            entity_context_attn_mask = utils.create_multiheadattention_attn_mask_batch(
+                lst_query_sequence_lengths=lst_entity_sequence_lengths,
+                lst_key_value_sequence_lengths=lst_context_sequence_lengths,
+                target_sequence_length=max(lst_entity_sequence_lengths),
+                source_sequence_length=max(lst_context_sequence_lengths),
+                num_heads=self._num_heads,
+                device=device
+            )
+            dict_ret["entity_context_attn_mask"] = entity_context_attn_mask
+
+
 
         return dict_ret
