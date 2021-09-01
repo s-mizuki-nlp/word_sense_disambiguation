@@ -21,7 +21,6 @@ import pytorch_lightning as pl
 from sam.sam import SAM
 
 from model.autoencoder import MaskedAutoEncoder
-from model.loss_unsupervised import ReconstructionLoss
 from model.loss_supervised import HyponymyScoreLoss, CodeLengthPredictionLoss
 
 
@@ -298,7 +297,6 @@ class SupervisedTrainer(UnsupervisedTrainer):
 
     def __init__(self,
                  model: MaskedAutoEncoder,
-                 loss_reconst: ReconstructionLoss,
                  loss_hyponymy: HyponymyScoreLoss,
                  loss_mutual_info: Optional[_Loss] = None,
                  loss_non_hyponymy: Optional[HyponymyScoreLoss] = None,
