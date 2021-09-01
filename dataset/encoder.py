@@ -245,7 +245,7 @@ def calc_entity_subwords_average_vectors(context_embeddings: Array_like,
 def extract_entity_subword_embeddings(context_embeddings: Array_like,
                                       lst_lst_entity_subword_spans: List[List[Tuple[int, int]]],
                                       padding: bool = False,
-                                      max_entity_subword_length: Optional[int] = None) -> Dict[str, Array_like]:
+                                      max_entity_subword_length: Optional[int] = None) -> Dict[str, Union[Array_like, List[int]]]:
     """
     extracts entity spans from context embeddings and returns as the list of tensors.
 
@@ -256,6 +256,8 @@ def extract_entity_subword_embeddings(context_embeddings: Array_like,
     @return: dictionary. embeddings: List[(n_window, n_dim)], sequence_lengths: List[n_window]
     """
     is_input_tensor = torch.is_tensor(context_embeddings)
+    context_embeddings = numpy_to_tensor(context_embeddings)
+
     assert context_embeddings.ndim == 2, f"`context_embeddings` dimension must be (max_seq_len, n_dim)."
 
     # extract entity subword embeddings as List[(n_subwords, n_dim)]
@@ -275,18 +277,13 @@ def extract_entity_subword_embeddings(context_embeddings: Array_like,
         max_entity_subword_length = n_window_max if max_entity_subword_length is None else max_entity_subword_length
         lst_embeddings = list(map(lambda emb_t: pad_trailing_tensors(emb_t, max_entity_subword_length), lst_embeddings))
 
+    if not is_input_tensor:
+        lst_embeddings = list(map(tensor_to_numpy, lst_embeddings))
+
     # store them
     dict_ret = {
         "embeddings": lst_embeddings,
-        "sequence_lengths": torch.tensor(lst_sequence_lengths) if is_input_tensor else np.array(lst_sequence_lengths)
+        "sequence_lengths": lst_sequence_lengths
     }
 
     return dict_ret
-
-
-# not yet implemented.
-def extract_entity_subword_embeddings_batch(subword_embeddings: torch.Tensor,
-                                      lst_lst_lst_entity_subword_spans: List[List[List[Tuple[int, int]]]],
-                                      pad_to_max_window_size: bool = False,
-                                      max_window_size: Optional[int] = None) -> Dict[str, List[List[torch.Tensor]]]:
-    pass
