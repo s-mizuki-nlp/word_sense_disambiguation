@@ -1,20 +1,14 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
-from __future__ import absolute_import
-from __future__ import unicode_literals
-from __future__ import division
-from __future__ import print_function
 
-import warnings
+
 from typing import Optional, Dict, Any, Union, Tuple
-import copy
-import inspect
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 from .loss_unsupervised import CodeValueMutualInformationLoss
-from onmt.global_attention import GlobalAttention
+from .onmt.global_attention import GlobalAttention
 
 class SimpleEncoder(nn.Module):
 
@@ -120,13 +114,13 @@ class LSTMEncoder(SimpleEncoder):
         # y_t -> e_{t+1}; t=0,1,...,N_d-2
         if self._trainable_beginning_of_code:
             # reserve last index as the embedding of the beginning of code (BOC).
-            n_codes = self._n_ary + 1
+            self._n_code_embeddings = self._n_ary + 1
         else:
-            n_codes = self._n_ary
+            self._n_code_embeddings = self._n_ary
         if self._code_embeddings_type == "time_distributed": # e_t = Embed(o_t;\theta)
-            self._embedding_code = nn.Linear(in_features=n_codes, out_features=self._n_dim_emb_code, bias=False)
+            self._embedding_code = nn.Linear(in_features=self._n_code_embeddings, out_features=self._n_dim_emb_code, bias=False)
         elif self._code_embeddings_type == "time_dependent": # e_t = Embed(o_t;\theta_t)
-            lst_layers = [nn.Linear(in_features=n_codes, out_features=self._n_dim_emb_code, bias=False) for _ in range(self._n_digits-1)]
+            lst_layers = [nn.Linear(in_features=self._n_code_embeddings, out_features=self._n_dim_emb_code, bias=False) for _ in range(self._n_digits-1)]
             self._embedding_code = nn.ModuleList(lst_layers)
         else:
             raise AssertionError(f"unknown `code_embeddings_type` value: {self._code_embeddings_type}")
@@ -160,7 +154,7 @@ class LSTMEncoder(SimpleEncoder):
         if self._trainable_beginning_of_code:
             t_idx_boc = torch.full(size=(n_batch,), fill_value=self._n_ary, device=device)
             if self._code_embeddings_type == "time_distributed":
-                e_0 = self._embedding_code(F.one_hot(t_idx_boc))
+                e_0 = self._embedding_code(F.one_hot(t_idx_boc).type(torch.float))
             elif self._code_embeddings_type == "time_dependent":
                 e_0 = self._embedding_code[0](F.one_hot(t_idx_boc))
         else:
@@ -168,21 +162,25 @@ class LSTMEncoder(SimpleEncoder):
 
         return h_0, c_0, e_0
 
-    def forward(self, input_x: torch.Tensor, input_y: torch.Tensor = None,
+    def forward(self, entity_vectors: torch.Tensor, ground_truth_synset_codes: torch.Tensor = None,
                 context_embeddings: Optional[torch.Tensor] = None,
+                context_sequence_lengths: Optional[torch.Tensor] = None,
                 init_states: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
                 on_inference: bool = False):
         """
 
-        @param input_x: input embeddings. shape: (n_batch, n_dim_emb)
-        @param input_y: one-hot encoded ground-truth codes. shape: (n_batch, n_digits, n_ary)
+        @param entity_vectors: input embeddings. shape: (n_batch, n_dim_emb)
+        @param ground_truth_synset_codes: ground-truth codes. shape: (n_batch, n_digits)
         @param init_states: input state vectors. tuple of (h_0,c_0) tensors. shape: (n_batch, n_dim_hidden)
-        @param context_embeddings: zero-padded context subword embeddings. shape: (n_batch, n_seq_len, n_dim_hidden)
+        @param context_embeddings: context subword embeddings. shape: (n_batch, n_seq_len, n_dim_hidden)
         @param on_inference: inference(True) or training(False)
         @return: tuple of (sampled codes, code probabilities). shape: (n_batch, n_digits, n_ary)
         """
-        dtype, device = self._dtype_and_device(input_x)
-        n_batch = input_x.shape[0]
+        dtype, device = self._dtype_and_device(entity_vectors)
+        n_batch = entity_vectors.shape[0]
+
+        if ground_truth_synset_codes is not None:
+            ground_truth_synset_codes = F.one_hot(ground_truth_synset_codes, num_classes=self._n_code_embeddings).type(torch.float)
 
         # initialize variables
         lst_prob_c = []
@@ -193,15 +191,16 @@ class LSTMEncoder(SimpleEncoder):
 
         # input: (n_batch, n_dim_emb + n_dim_emb_code)
         for d in range(self._n_digits):
-            input = torch.cat([input_x, e_d], dim=-1)
+            input = torch.cat([entity_vectors, e_d], dim=-1)
             # h_d, c_d: (n_batch, n_dim_hidden)
             h_d, c_d = self._lstm_cell(input, (h_d, c_d))
 
             # compute Pr{c_d=d|c_{<d}} = softmax( FF([h_t;a_t]) )
             if isinstance(self._global_attention, GlobalAttention):
                 src = h_d.unsqueeze(1)
-                context_lengths = (context_embeddings.sum(dim=-1) != 0.0).type(torch.long).sum(dim=-1)
-                a_d = self._global_attention.forward(source=src, memory_bank=context_embeddings, memory_lengths=context_lengths)
+                a_d, _ = self._global_attention.forward(source=src, memory_bank=context_embeddings,
+                                                     memory_lengths=context_sequence_lengths)
+                a_d = a_d.squeeze(0)
                 h_and_a_d = torch.cat([h_d, a_d], dim=-1)
                 t_z_d_dash = self._h_to_z(h_and_a_d)
             else:
@@ -233,7 +232,7 @@ class LSTMEncoder(SimpleEncoder):
                 if self._teacher_forcing:
                     # teacher forcing
                     # o_d = input_y[:, d, :]
-                    o_d = torch.index_select(input_y, dim=1, index=torch.tensor(d, device=device))
+                    o_d = torch.index_select(ground_truth_synset_codes, dim=1, index=torch.tensor(d, device=device)).squeeze()
                 else:
                     # student forcing (detached previous output)
                     o_d = t_latent_code_d.detach()
@@ -302,6 +301,8 @@ class TransformerEncoder(SimpleEncoder):
                  dtype=torch.float32,
                  **kwargs):
 
+        raise NotImplementedError(f"not implemented yet.")
+
         super(SimpleEncoder, self).__init__()
 
         self._n_dim_emb = n_dim_emb
@@ -352,12 +353,6 @@ class TransformerEncoder(SimpleEncoder):
         else:
             lst_layers = [nn.Linear(in_features=n_dim_transformer, out_features=self._n_ary, bias=True) for _ in range(self._n_digits)]
             self._prediction_layer = nn.ModuleList(lst_layers)
-
-    def init_bias_to_min(self):
-        warnings.warn(f"it doesn't affect anything.")
-
-    def init_bias_to_max(self):
-        warnings.warn(f"it doesn't affect anything.")
 
     def _dtype_and_device(self, t: torch.Tensor):
         return t.dtype, t.device
@@ -414,11 +409,3 @@ class TransformerEncoder(SimpleEncoder):
             t_prob_c = CodeValueMutualInformationLoss.calc_adjusted_code_probability(t_prob_c)
 
         return t_prob_c
-
-    @property
-    def gate_open_ratio(self):
-        return None
-
-    @gate_open_ratio.setter
-    def gate_open_ratio(self, value):
-        pass
