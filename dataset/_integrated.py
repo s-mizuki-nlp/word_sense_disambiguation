@@ -8,6 +8,7 @@ import torch
 from .contextualized_embeddings import BERTEmbeddingsDataset
 from .lexical_knowledge import LemmaDataset, SynsetDataset
 
+from torch.nn import functional as F
 from torch.utils.data import IterableDataset
 from .encoder import extract_entity_subword_embeddings, calc_entity_subwords_average_vectors
 from . import utils
@@ -17,11 +18,11 @@ class WSDTaskDataset(IterableDataset):
     def __init__(self, bert_embeddings_dataset: BERTEmbeddingsDataset,
                  lexical_knowledge_lemma_dataset: LemmaDataset,
                  lexical_knowledge_synset_dataset: Optional[SynsetDataset] = None,
+                 n_ancestor_hop_of_ground_truth_synset: int = 0,
                  return_level: str = "entity",
                  record_entity_field_name: str = "monosemous_entities",
                  record_entity_span_field_name: str = "subword_spans",
                  return_entity_subwords_avg_vector: bool = False,
-                 return_ancestor_synset_code: Union[bool, int] = False,
                  raise_error_on_unknown_lemma: bool = True,
                  excludes: Optional[Set[str]] = None):
 
@@ -35,12 +36,9 @@ class WSDTaskDataset(IterableDataset):
         self._return_entity_subwords_avg_vector = return_entity_subwords_avg_vector
         self._excludes = set() if excludes is None else excludes
 
-        if isinstance(return_ancestor_synset_code, bool):
-            self._return_ancestor_synset_code = 1 if return_ancestor_synset_code == True else -1
-        elif isinstance(return_ancestor_synset_code, int):
-            assert return_ancestor_synset_code > 0, f"`return_ancestor_synset_code` must be greater than zero: {return_ancestor_synset_code}"
-            self._return_ancestor_synset_code = return_ancestor_synset_code
-        if self._return_ancestor_synset_code > 0:
+        assert n_ancestor_hop_of_ground_truth_synset >= 0, f"`n_ancestor_hop_of_ground_truth_synset` must be zero or positive: {n_ancestor_hop_of_ground_truth_synset}"
+        self._n_ancestor_hop_of_ground_truth_synset = n_ancestor_hop_of_ground_truth_synset
+        if self._n_ancestor_hop_of_ground_truth_synset > 0:
             assert lexical_knowledge_synset_dataset, f"you have to specify `lexical_knowledge_synset_dataset` to get ancestor synset code."
 
     @classmethod
@@ -84,8 +82,8 @@ class WSDTaskDataset(IterableDataset):
                     "entity_sequence_length": lst_entity_seq_len[idx],
                     "context_embedding": context_embedding,
                     "context_sequence_length": context_sequence_length,
-                    "synset_id": synset_ids[0],
-                    "synset_code": synset_codes[0],
+                    "original_synset_id": synset_ids[0],
+                    "original_synset_code": synset_codes[0],
                     "lexname": lexnames[0]
                 }
 
@@ -94,12 +92,18 @@ class WSDTaskDataset(IterableDataset):
                     obj_entity["entity_span_avg_vector"] = lst_entity_span_avg_vectors[idx]
 
                 # (optional) get ancestor synset
-                if self._return_ancestor_synset_code > 0:
+                if self._n_ancestor_hop_of_ground_truth_synset == 0:
+                    obj_entity["ground_truth_synset_id"] = obj_entity["original_synset_id"]
+                    obj_entity["ground_truth_synset_code"] = obj_entity["original_synset_code"]
+                else:
                     lst_ancestor_synsets = self.synset_dataset.get_ancestor_synsets(synset_ids[0])
-                    if len(lst_ancestor_synsets) >= self._return_ancestor_synset_code:
-                        ancestor_synset = lst_ancestor_synsets[self._return_ancestor_synset_code-1]
-                        obj_entity["ancestor_synset_id"] = ancestor_synset["id"]
-                        obj_entity["ancestor_synset_code"] = ancestor_synset["code"]
+                    if len(lst_ancestor_synsets) == 0:
+                        warnings.warn(f"failed to lookup ancestor synset: {synset_ids[0]}")
+                        continue
+                    idx = min(self._n_ancestor_hop_of_ground_truth_synset, len(lst_ancestor_synsets)) - 1
+                    ancestor_synset = lst_ancestor_synsets[idx]
+                    obj_entity["ground_truth_synset_id"] = ancestor_synset["id"]
+                    obj_entity["ground_truth_synset_code"] = ancestor_synset["code"]
 
                 obj_entity.update(dict_entity_record)
 
@@ -172,18 +176,22 @@ class WSDTaskDataset(IterableDataset):
     def embeddings_dataset(self):
         return self._bert_embeddings
 
+    @property
+    def n_ancestor_hop_of_ground_truth_synset(self):
+        return self._n_ancestor_hop_of_ground_truth_synset
+
 
 class WSDTaskDatasetCollateFunction(object):
 
     def __init__(self,
-                 require_entity_context_attn_mask: bool = False,
-                 require_global_attn_mask: bool = True,
+                 return_records: bool = True,
+                 return_entity_context_attn_mask: bool = False,
                  num_heads_entity_context_mha: Optional[int] = None):
 
-        self._require_entity_context_attn_mask = require_entity_context_attn_mask
-        self._require_global_attn_mask = require_global_attn_mask
+        self._return_records = return_records
+        self._return_entity_context_attn_mask = return_entity_context_attn_mask
 
-        if require_entity_context_attn_mask:
+        if return_entity_context_attn_mask:
             assert isinstance(num_heads_entity_context_mha, int), \
                 f"you must specify the number of attention heads of MHA module as: `num_heads_entity_context_mha`"
         self._num_heads = num_heads_entity_context_mha
@@ -215,7 +223,7 @@ class WSDTaskDatasetCollateFunction(object):
         dict_ret["context_sequence_mask"] = utils.create_sequence_mask(lst_context_sequence_lengths, device=device)
 
         ## (optional) attn_mask for MultiheadAttention module.
-        if self._require_entity_context_attn_mask:
+        if self._return_entity_context_attn_mask:
             entity_context_attn_mask = utils.create_multiheadattention_attn_mask_batch(
                 lst_query_sequence_lengths=lst_entity_sequence_lengths,
                 lst_key_value_sequence_lengths=lst_context_sequence_lengths,
@@ -226,6 +234,15 @@ class WSDTaskDatasetCollateFunction(object):
             )
             dict_ret["entity_context_attn_mask"] = entity_context_attn_mask
 
+        # ground truth: synset code
+        dict_ret["ground_truth_synset_codes"] = torch.tensor(_list_of("ground_truth_synset_code"), dtype=torch.long, device=device)
+        dict_ret["ground_truth_synset_ids"] = _list_of("ground_truth_synset_id")
 
+        # other attributes are accumulated as `records` object.
+        if self._return_records:
+            trim_plural = lambda name: name[:-1] if name.endswith("s") else name
+            set_uncaught_fields = set_field_names - set([trim_plural(name) for name in dict_ret.keys()])
+            lst_records = [{name:e_object.get(name, None) for name in set_uncaught_fields} for e_object in lst_entity_objects]
+            dict_ret["records"] = lst_records
 
         return dict_ret
