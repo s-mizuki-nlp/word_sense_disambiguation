@@ -7,7 +7,6 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.modules import loss as L
 
-
 class CodeLengthPredictionLoss(L._Loss):
 
     def __init__(self, scale: float = 1.0, normalize_code_length: bool = False, normalize_coefficient_for_ground_truth: float = 1.0,
@@ -456,3 +455,16 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
             loss = loss_i
 
         return loss * self._scale
+
+
+class CrossEntropyLossWrapper(L.CrossEntropyLoss):
+
+    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.Tensor) -> torch.Tensor:
+        """
+
+        @param input_code_probabilities: shape: (n_batch, n_digits, n_ary). t[b,d,a] = P(C_d=a|x_b)
+        @param target_codes: shape: (n_batch, n_digits). t[b,d] = c_d \in {0,1,...,n_ary-1}
+        """
+        input_score = torch.log(input_code_probabilities).swapaxes(1,2)
+
+        return super().forward(input_score, target_codes)
