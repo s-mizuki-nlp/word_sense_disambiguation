@@ -20,7 +20,7 @@ import pytorch_lightning as pl
 
 from sam.sam import SAM
 
-from model.autoencoder import MaskedAutoEncoder
+from model.core import MaskedAutoEncoder
 from model.loss_supervised import HyponymyScoreLoss, CodeLengthPredictionLoss
 
 

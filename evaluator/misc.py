@@ -13,7 +13,7 @@ from dataset.taxonomy import WordNetTaxonomy
 from .hyponymy import HyponymyScoreBasedPredictor
 from .supervised import BaseEvaluator
 from dataset.word_embeddings import AbstractWordEmbeddingsDataset
-from model.autoencoder import AutoEncoder
+from model.core import HierarchicalCodeEncoder
 from torch.utils.data import DataLoader, Dataset
 
 
@@ -134,7 +134,7 @@ class WordNetHyponymyScoreDiffEvaluator(BaseEvaluator):
     @return lists of s_pred, s_gt, s_diff, category
     """
 
-    def __init__(self, model: AutoEncoder,
+    def __init__(self, model: HierarchicalCodeEncoder,
                  taxonomy: WordNetTaxonomy,
                  embeddings_dataset: Optional[AbstractWordEmbeddingsDataset] = None,
                  evaluation_dataset: Optional[Dataset] = None,

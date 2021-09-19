@@ -14,14 +14,14 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 from dataset.word_embeddings import AbstractWordEmbeddingsDataset
-from model.autoencoder import AutoEncoder
+from model.core import HierarchicalCodeEncoder
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report, f1_score, roc_auc_score
 from .hyponymy import HyponymyScoreBasedPredictor, EntailmentProbabilityBasedPredictor
 from scipy.stats import spearmanr, kendalltau
 
 class BaseEvaluator(object, metaclass=ABCMeta):
 
-    def __init__(self, model: AutoEncoder,
+    def __init__(self, model: HierarchicalCodeEncoder,
                  hyponymy_predictor_type: str = "hyponymy_score",
                  embeddings_dataset: Optional[AbstractWordEmbeddingsDataset] = None,
                  evaluation_dataset: Optional[Dataset] = None,

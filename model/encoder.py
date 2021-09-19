@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
-
-
+import warnings
 from typing import Optional, Dict, Any, Union, Tuple
 import torch
 from torch import nn
@@ -79,6 +78,7 @@ class LSTMEncoder(SimpleEncoder):
                  n_dim_hidden: Optional[int] = None,
                  n_dim_emb_code: Optional[int] = None,
                  teacher_forcing: bool = True,
+                 input_entity_vector: bool = True,
                  discretizer: Optional[nn.Module] = None,
                  global_attention_type: Optional[str] = None,
                  code_embeddings_type: str = "time_distributed",
@@ -100,16 +100,24 @@ class LSTMEncoder(SimpleEncoder):
         self._n_ary_internal = None
         self._global_attention_type = global_attention_type
         self._teacher_forcing = teacher_forcing
+        self._input_entity_vector = input_entity_vector
         self._code_embeddings_type = code_embeddings_type
         self._trainable_beginning_of_code = trainable_beginning_of_code
         self._prob_zero_monotone_increasing = prob_zero_monotone_increasing
+
+        if self._input_entity_vector == False:
+            warnings.warn("entity vector input is disabled. we recommend you to input initial states instead.")
 
         self._build()
 
     def _build(self):
 
-        # ([x;e_t],h_t) -> h_t
-        self._lstm_cell = nn.LSTMCell(input_size=self._n_dim_emb+self._n_dim_emb_code, hidden_size=self._n_dim_hidden, bias=True)
+        # ([x;e_t],h_t) or (e_t,h_t) -> h_t
+        if self._input_entity_vector:
+            input_size = self._n_dim_emb + self._n_dim_emb_code
+        else:
+            input_size = self._n_dim_emb_code
+        self._lstm_cell = nn.LSTMCell(input_size=input_size, hidden_size=self._n_dim_hidden, bias=True)
 
         # y_t -> e_{t+1}; t=0,1,...,N_d-2
         if self._trainable_beginning_of_code:
@@ -191,7 +199,10 @@ class LSTMEncoder(SimpleEncoder):
 
         # input: (n_batch, n_dim_emb + n_dim_emb_code)
         for d in range(self._n_digits):
-            input = torch.cat([entity_vectors, e_d], dim=-1)
+            if self._input_entity_vector:
+                input = torch.cat([entity_vectors, e_d], dim=-1)
+            else:
+                input = e_d
             # h_d, c_d: (n_batch, n_dim_hidden)
             h_d, c_d = self._lstm_cell(input, (h_d, c_d))
 
@@ -285,6 +296,10 @@ class LSTMEncoder(SimpleEncoder):
     @property
     def n_dim_hidden(self):
         return self._n_dim_hidden
+
+    @property
+    def teacher_forcing(self):
+        return self._teacher_forcing
 
 
 class TransformerEncoder(SimpleEncoder):

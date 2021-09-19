@@ -11,13 +11,13 @@ import pydash
 import torch
 from torch.utils.data import DataLoader
 from dataset.word_embeddings import AbstractWordEmbeddingsDataset
-from model.autoencoder import AutoEncoder
+from model.core import HierarchicalCodeEncoder
 from .utils import total_variation_distance
 
 
 class TotalVariationDistanceEvaluator(object):
 
-    def __init__(self, model: AutoEncoder, data_loader: DataLoader):
+    def __init__(self, model: HierarchicalCodeEncoder, data_loader: DataLoader):
 
         self._model = model
         self._data_loader = data_loader
@@ -50,7 +50,7 @@ class TotalVariationDistanceEvaluator(object):
 
 class CodeCountEvaluator(object):
 
-    def __init__(self, model: AutoEncoder, embeddings_dataset: AbstractWordEmbeddingsDataset,
+    def __init__(self, model: HierarchicalCodeEncoder, embeddings_dataset: AbstractWordEmbeddingsDataset,
                  **kwargs_dataloader):
         self._n_digits, self._n_ary = model.n_digits, model.n_ary
         self._model = model
