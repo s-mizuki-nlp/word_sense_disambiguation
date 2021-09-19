@@ -170,7 +170,8 @@ class LSTMEncoder(SimpleEncoder):
 
         return h_0, c_0, e_0
 
-    def forward(self, entity_vectors: torch.Tensor, ground_truth_synset_codes: torch.Tensor = None,
+    def forward(self, entity_vectors: torch.Tensor,
+                ground_truth_synset_codes: torch.Tensor = None,
                 context_embeddings: Optional[torch.Tensor] = None,
                 context_sequence_lengths: Optional[torch.Tensor] = None,
                 init_states: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
@@ -270,8 +271,8 @@ class LSTMEncoder(SimpleEncoder):
 
         return t_latent_code, t_prob_c
 
-    def calc_code_probability(self, input_x: torch.Tensor, adjust_code_probability: bool = False, **kwargs):
-        _, t_prob_c = self.forward(input_x, on_inference=True)
+    def calc_code_probability(self, adjust_code_probability: bool = False, **kwargs):
+        _, t_prob_c = self.forward(**kwargs, on_inference=True)
         if adjust_code_probability:
             t_prob_c = CodeValueMutualInformationLoss.calc_adjusted_code_probability(t_prob_c)
 

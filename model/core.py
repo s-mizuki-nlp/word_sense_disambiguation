@@ -5,38 +5,62 @@ from __future__ import unicode_literals
 from __future__ import division
 from __future__ import print_function
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import warnings
+
+import numpy
 import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
 from contextlib import ExitStack
+from dataset import utils
+from .encoder import LSTMEncoder
+from .attention import EntityVectorEncoder, InitialStatesEncoder
 
-class AutoEncoder(nn.Module):
+class HierarchicalCodeEncoder(nn.Module):
 
-    def __init__(self, encoder: nn.Module, decoder: nn.Module, discretizer: nn.Module, normalize_output_length: bool = False, dtype=torch.float32, **kwargs):
+    def __init__(self, encoder: LSTMEncoder,
+                 discretizer: nn.Module,
+                 entity_vector_encoder: Optional[EntityVectorEncoder] = None,
+                 initial_states_encoder: Optional[InitialStatesEncoder] = None,
+                 **kwargs):
 
-        super(AutoEncoder, self).__init__()
+        super(HierarchicalCodeEncoder, self).__init__()
         self._encoder = encoder
         self._encoder_class_name = encoder.__class__.__name__
-        self._decoder = decoder
+        self._entity_vector_encoder = entity_vector_encoder
+        self._initial_states_encoder = initial_states_encoder
 
         built_in_discretizer = getattr(self._encoder, "use_built_in_discretizer", False)
         if built_in_discretizer:
             self._discretizer = self._encoder.built_in_discretizer
         else:
             self._discretizer = discretizer
-        self._normalize_output_length = normalize_output_length
-        self._dtype = dtype
 
     @property
     def n_ary(self):
-        return self._encoder._n_ary
+        return self._encoder.n_ary
 
     @property
     def n_digits(self):
-        return self._encoder._n_digits
+        return self._encoder.n_digits
+
+    @property
+    def n_dim_hidden(self):
+        return self._encoder.n_dim_hidden
+
+    @property
+    def teacher_forcing(self):
+        return getattr(self._encoder, "teacher_forcing", True)
+
+    @property
+    def use_entity_vector_encoder(self):
+        return self._entity_vector_encoder is not None
+
+    @property
+    def use_initial_state_encoder(self):
+        return self._initial_states_encoder is not None
 
     @property
     def temperature(self):
@@ -47,134 +71,99 @@ class AutoEncoder(nn.Module):
         if self.temperature is not None:
             setattr(self._discretizer, "temperature", value)
 
-    @property
-    def gate_open_ratio(self):
-        value_e = getattr(self._encoder, "gate_open_ratio", None)
-        value_d = getattr(self._discretizer, "gate_open_ratio", None)
-        if value_e is not None:
-            return value_e
-        elif value_d is not None:
-            return value_d
-        else:
-            return None
-
-    @gate_open_ratio.setter
-    def gate_open_ratio(self, value):
-        if hasattr(self._encoder, "gate_open_ratio"):
-            setattr(self._encoder, "gate_open_ratio", value)
-        if hasattr(self._discretizer, "gate_open_ratio"):
-            setattr(self._discretizer, "gate_open_ratio", value)
-
-    def _numpy_to_tensor(self, np_array: np.array):
-        return torch.from_numpy(np_array).type(self._dtype)
-
-    def _tensor_to_numpy(self, t_x: torch.Tensor):
-        return t_x.cpu().numpy()
-
-    def _normalize(self, x: torch.Tensor, x_dash: torch.Tensor):
-        """
-        adjust reconstructed embeddings (`x_dash`) so that the L2 norm will be identical to the original embeddings (`x`).
-
-        :param x: original embeddings
-        :param x_dash: reconstructed embeddings
-        :return: length-normalized reconstructed embeddings
-        """
-        x_norm = torch.norm(x, dim=-1, keepdim=True)
-        x_dash_norm = torch.norm(x_dash, dim=-1, keepdim=True)
-        scale_factor = x_norm / (x_dash_norm + 1E-7)
-
-        return x_dash * scale_factor
-
-    def forward(self, t_x: torch.Tensor, requires_grad: bool = True, enable_discretizer: bool = True):
+    def forward(self, entity_span_avg_vectors: Optional[torch.Tensor] = None,
+                ground_truth_synset_codes: Optional[torch.Tensor] = None,
+                entity_embeddings: Optional[torch.Tensor] = None,
+                entity_sequence_mask: Optional[torch.BoolTensor] = None,
+                entity_sequence_lengths: Optional[torch.LongTensor] = None,
+                context_embeddings: Optional[torch.Tensor] = None,
+                context_sequence_mask: Optional[torch.BoolTensor] = None,
+                context_sequence_lengths: Optional[torch.LongTensor] = None,
+                requires_grad: bool = True, enable_discretizer: bool = True, **kwargs):
 
         with ExitStack() as context_stack:
             # if user doesn't require gradient, disable back-propagation
             if not requires_grad:
                 context_stack.enter_context(torch.no_grad())
 
+            # entity vectors
+            ## 1. calculate entity vectors using encoder.
+            if self.use_entity_vector_encoder:
+                entity_vectors = self._entity_vector_encoder.forward(entity_embeddings=entity_embeddings,
+                                                                     context_embeddings=context_embeddings,
+                                                                     entity_sequence_mask=entity_sequence_mask,
+                                                                     context_sequence_mask=context_sequence_mask)
+            ## 2. use entity span averaged vectors as it is.
+            elif entity_span_avg_vectors is not None:
+                entity_vectors = entity_span_avg_vectors
+            else:
+                raise ValueError(f"We couldn't obtain entity vectors.")
+
+            # initial states
+            if self.use_initial_state_encoder:
+                init_states = self._initial_states_encoder.forward(entity_embeddings=entity_embeddings,
+                                                                   context_embeddings=context_embeddings,
+                                                                   entity_sequence_mask=entity_sequence_mask,
+                                                                   context_sequence_mask=context_sequence_mask)
+            else:
+                init_states = None
+
+            # ground truth codes
+            if not self.teacher_forcing:
+                ground_truth_synset_codes = None
+
             # encoder and discretizer
-            if self._encoder_class_name == "AutoRegressiveLSTMEncoder":
+            if self._encoder_class_name == "LSTMEncoder":
+                t_latent_code, t_code_prob = self._encoder.forward(entity_vectors=entity_vectors,
+                                                                   ground_truth_synset_codes=ground_truth_synset_codes,
+                                                                   context_embeddings=context_embeddings,
+                                                                   context_sequence_lengths=context_sequence_lengths,
+                                                                   init_states=init_states,
+                                                                   on_inference=False)
                 if self._encoder.use_built_in_discretizer:
-                    t_latent_code, t_code_prob = self._encoder.forward(t_x)
+                    pass
                 else:
-                    _, t_code_prob = self._encoder.forward(t_x)
                     if enable_discretizer:
                         t_latent_code = self._discretizer.forward(t_code_prob)
                     else:
                         t_latent_code = t_code_prob
             else:
-                t_code_prob = self._encoder.forward(t_x)
-                if enable_discretizer:
-                    t_latent_code = self._discretizer.forward(t_code_prob)
-                else:
-                    t_latent_code = t_code_prob
+                raise NotImplementedError("Not implemented yet.")
 
-            # decoder
-            t_x_dash = self._decoder.forward(t_latent_code)
+        return t_latent_code, t_code_prob
 
-            # length-normalizer
-            if self._normalize_output_length:
-                t_x_dash = self._normalize(x=t_x, x_dash=t_x_dash)
+    def _numpy_to_tensor(self, **kwargs):
+        for key, value in kwargs.items():
+            if isinstance(value, utils.Array_like):
+                kwargs[key] = utils.numpy_to_tensor(value)
+        return kwargs
 
-        return t_latent_code, t_code_prob, t_x_dash
+    def _predict(self, **kwargs):
+        return self.forward(**kwargs, requires_grad=False, enable_discretizer=False)
 
-    def _predict(self, t_x: torch.Tensor):
+    def predict(self, **kwargs):
+        kwargs = self._numpy_to_tensor(**kwargs)
+        t_latent_code, t_code_prob = self._predict(**kwargs)
+        return tuple(map(utils.tensor_to_numpy, (t_latent_code, t_code_prob)))
 
-        return self.forward(t_x, requires_grad=False, enable_discretizer=False)
+    def encode(self, adjust_code_probability: bool = False, **kwargs):
+        v_code_prob = self.encode_soft(**kwargs, adjust_code_probability=adjust_code_probability)
+        v_code = np.argmax(v_code_prob, axis=-1)
+        return v_code
 
-    def predict(self, mat_x: np.ndarray):
-
-        t_x = self._numpy_to_tensor(mat_x)
-        t_latent_code, t_code_prob, t_x_dash = self._predict(t_x)
-
-        return tuple(map(self._tensor_to_numpy, (t_latent_code, t_code_prob, t_x_dash)))
-
-    def _encode(self, t_x: torch.Tensor, **kwargs):
-
-        t_code_prob = self._encoder.calc_code_probability(t_x, **kwargs)
-        t_code = torch.argmax(t_code_prob, dim=2, keepdim=False)
-        return t_code
-
-    def encode(self, mat_x: np.ndarray, **kwargs):
-
-        with ExitStack() as context_stack:
-            context_stack.enter_context(torch.no_grad())
-            t_x = self._numpy_to_tensor(mat_x)
-            t_code = self._encode(t_x, **kwargs)
-
-        return t_code.cpu().numpy()
-
-    def _encode_soft(self, t_x: torch.Tensor, **kwargs):
-        t_code_prob = self._encoder.calc_code_probability(t_x, **kwargs)
+    def _encode_soft(self, adjust_code_probability: bool = False, **kwargs):
+        t_code_prob = self._encoder.calc_code_probability(**kwargs, adjust_code_probability=adjust_code_probability)
         return t_code_prob
 
-    def encode_soft(self, mat_x: np.ndarray, **kwargs):
-
+    def encode_soft(self, adjust_code_probability: bool = False, **kwargs):
         with ExitStack() as context_stack:
             context_stack.enter_context(torch.no_grad())
-            t_x = self._numpy_to_tensor(mat_x)
-            t_prob = self._encode_soft(t_x, **kwargs)
-
+            kwargs = self._numpy_to_tensor(**kwargs)
+            t_prob = self._encode_soft(**kwargs, adjust_code_probability=adjust_code_probability)
         return t_prob.cpu().numpy()
 
-    def _decode(self, t_code_prob: torch.Tensor):
 
-        # t_code_prob: (N_batch, N_digits, N_ary), t_c_[b,n,m] \in [0,1]
-        return self._decoder.forward(t_code_prob)
-
-    def decode(self, mat_code: np.ndarray):
-
-        with ExitStack() as context_stack:
-            context_stack.enter_context(torch.no_grad())
-            n_ary = self._decoder.n_ary
-            # one-hot encoding
-            t_code_prob = self._numpy_to_tensor(np.eye(n_ary)[mat_code])
-            t_x_dash = self._decode(t_code_prob)
-
-        return t_x_dash.cpu().numpy()
-
-
-class MaskedAutoEncoder(AutoEncoder):
+class MaskedAutoEncoder(HierarchicalCodeEncoder):
 
     def __init__(self, encoder: nn.Module, decoder: nn.Module, discretizer: nn.Module, masked_value: int = 0, normalize_output_length: bool = True, dtype=torch.float32, **kwargs):
         """
