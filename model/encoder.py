@@ -175,7 +175,7 @@ class LSTMEncoder(SimpleEncoder):
                 context_embeddings: Optional[torch.Tensor] = None,
                 context_sequence_lengths: Optional[torch.Tensor] = None,
                 init_states: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-                on_inference: bool = False):
+                on_inference: bool = False, **kwargs):
         """
 
         @param entity_vectors: input embeddings. shape: (n_batch, n_dim_emb)
@@ -271,13 +271,6 @@ class LSTMEncoder(SimpleEncoder):
 
         return t_latent_code, t_prob_c
 
-    def calc_code_probability(self, adjust_code_probability: bool = False, **kwargs):
-        _, t_prob_c = self.forward(**kwargs, on_inference=True)
-        if adjust_code_probability:
-            t_prob_c = CodeValueMutualInformationLoss.calc_adjusted_code_probability(t_prob_c)
-
-        return t_prob_c
-
     @property
     def use_built_in_discretizer(self):
         return self._is_discretize_code_probability
@@ -301,6 +294,10 @@ class LSTMEncoder(SimpleEncoder):
     @property
     def teacher_forcing(self):
         return self._teacher_forcing
+
+    @property
+    def global_attention_type(self):
+        return self._global_attention_type
 
 
 class TransformerEncoder(SimpleEncoder):

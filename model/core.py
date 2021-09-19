@@ -52,7 +52,7 @@ class HierarchicalCodeEncoder(nn.Module):
 
     @property
     def teacher_forcing(self):
-        return getattr(self._encoder, "teacher_forcing", True)
+        return getattr(self._encoder, "teacher_forcing", False)
 
     @property
     def use_entity_vector_encoder(self):
@@ -63,6 +63,14 @@ class HierarchicalCodeEncoder(nn.Module):
         return self._initial_states_encoder is not None
 
     @property
+    def global_attention_type(self):
+        return getattr(self._encoder, "global_attention_type", False)
+
+    @property
+    def has_discretizer(self):
+        return self._discretizer is not None
+
+    @property
     def temperature(self):
         return getattr(self._discretizer, "temperature", None)
 
@@ -71,15 +79,30 @@ class HierarchicalCodeEncoder(nn.Module):
         if self.temperature is not None:
             setattr(self._discretizer, "temperature", value)
 
+    def summary(self):
+        ret = {
+            "n_ary": self.n_ary,
+            "n_digits": self.n_digits,
+            "n_dim": self.n_dim_hidden,
+            "use_entity_vector_encoder": self.use_entity_vector_encoder,
+            "use_initial_state_encoder": self.use_initial_state_encoder,
+            "global_attention_type": self.global_attention_type,
+            "teacher_forcing": self.teacher_forcing,
+            "has_discretizer": self.has_discretizer,
+            "discretizer.temperature": self.temperature
+        }
+        return ret
+
     def forward(self, entity_span_avg_vectors: Optional[torch.Tensor] = None,
                 ground_truth_synset_codes: Optional[torch.Tensor] = None,
                 entity_embeddings: Optional[torch.Tensor] = None,
                 entity_sequence_mask: Optional[torch.BoolTensor] = None,
-                entity_sequence_lengths: Optional[torch.LongTensor] = None,
                 context_embeddings: Optional[torch.Tensor] = None,
                 context_sequence_mask: Optional[torch.BoolTensor] = None,
                 context_sequence_lengths: Optional[torch.LongTensor] = None,
-                requires_grad: bool = True, enable_discretizer: bool = True, **kwargs):
+                requires_grad: bool = True, enable_discretizer: bool = True,
+                on_inference: bool = False,
+                **kwargs):
 
         with ExitStack() as context_stack:
             # if user doesn't require gradient, disable back-propagation
@@ -119,14 +142,14 @@ class HierarchicalCodeEncoder(nn.Module):
                                                                    context_embeddings=context_embeddings,
                                                                    context_sequence_lengths=context_sequence_lengths,
                                                                    init_states=init_states,
-                                                                   on_inference=False)
+                                                                   on_inference=on_inference)
                 if self._encoder.use_built_in_discretizer:
                     pass
                 else:
-                    if enable_discretizer:
+                    if enable_discretizer and self.has_discretizer:
                         t_latent_code = self._discretizer.forward(t_code_prob)
                     else:
-                        t_latent_code = t_code_prob
+                        t_latent_code = None
             else:
                 raise NotImplementedError("Not implemented yet.")
 
@@ -134,32 +157,32 @@ class HierarchicalCodeEncoder(nn.Module):
 
     def _numpy_to_tensor(self, **kwargs):
         for key, value in kwargs.items():
-            if isinstance(value, utils.Array_like):
+            if isinstance(value, (np.ndarray, torch.Tensor)):
                 kwargs[key] = utils.numpy_to_tensor(value)
         return kwargs
 
     def _predict(self, **kwargs):
-        return self.forward(**kwargs, requires_grad=False, enable_discretizer=False)
+        return self.forward(**kwargs, requires_grad=False, on_inference=True, enable_discretizer=True)
 
     def predict(self, **kwargs):
         kwargs = self._numpy_to_tensor(**kwargs)
         t_latent_code, t_code_prob = self._predict(**kwargs)
         return tuple(map(utils.tensor_to_numpy, (t_latent_code, t_code_prob)))
 
-    def encode(self, adjust_code_probability: bool = False, **kwargs):
-        v_code_prob = self.encode_soft(**kwargs, adjust_code_probability=adjust_code_probability)
+    def encode(self, **kwargs):
+        v_code_prob = self.encode_soft(**kwargs)
         v_code = np.argmax(v_code_prob, axis=-1)
         return v_code
 
-    def _encode_soft(self, adjust_code_probability: bool = False, **kwargs):
-        t_code_prob = self._encoder.calc_code_probability(**kwargs, adjust_code_probability=adjust_code_probability)
+    def _encode_soft(self, **kwargs):
+        _, t_code_prob = self.forward(**kwargs, requires_grad=False, on_inference=True, enable_discretizer=False)
         return t_code_prob
 
-    def encode_soft(self, adjust_code_probability: bool = False, **kwargs):
+    def encode_soft(self, **kwargs):
         with ExitStack() as context_stack:
             context_stack.enter_context(torch.no_grad())
             kwargs = self._numpy_to_tensor(**kwargs)
-            t_prob = self._encode_soft(**kwargs, adjust_code_probability=adjust_code_probability)
+            t_prob = self._encode_soft(**kwargs)
         return t_prob.cpu().numpy()
 
 
