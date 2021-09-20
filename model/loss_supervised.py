@@ -9,7 +9,7 @@ from torch.nn.modules import loss as L
 
 class CodeLengthPredictionLoss(L._Loss):
 
-    def __init__(self, scale: float = 1.0, normalize_code_length: bool = False, normalize_coefficient_for_ground_truth: float = 1.0,
+    def __init__(self, scale: float = 1.0, normalize_code_length: bool = False,
                  distance_metric: str = "scaled-mse",
                  size_average=None, reduce=None, reduction='mean'):
 
@@ -17,7 +17,6 @@ class CodeLengthPredictionLoss(L._Loss):
 
         self._scale = scale
         self._normalize_code_length = normalize_code_length
-        self._normalize_coef_for_gt = normalize_coefficient_for_ground_truth
 
         self._distance_metric = distance_metric
         if distance_metric == "mse":
@@ -170,45 +169,13 @@ class CodeLengthPredictionLoss(L._Loss):
         return loss * self._scale
 
 
-class CodeLengthDiffPredictionLoss(CodeLengthPredictionLoss):
-
-    def forward(self, t_prob_c_batch: torch.Tensor, lst_code_length_diff_tuple: List[Tuple[int, int, float]]) -> torch.Tensor:
-
-        # x: hypernym, y: hyponym
-        dtype, device = self._dtype_and_device(t_prob_c_batch)
-
-        t_idx_x = torch.tensor([tup[0] for tup in lst_code_length_diff_tuple], dtype=torch.long, device=device)
-        t_idx_y = torch.tensor([tup[1] for tup in lst_code_length_diff_tuple], dtype=torch.long, device=device)
-        y_true = torch.tensor([tup[2] for tup in lst_code_length_diff_tuple], dtype=dtype, device=device)
-
-        # compute diff of code length
-        t_code_length = self.calc_soft_code_length(t_prob_c=t_prob_c_batch)
-        t_code_length_x = torch.index_select(t_code_length, dim=0, index=t_idx_x)
-        t_code_length_y = torch.index_select(t_code_length, dim=0, index=t_idx_y)
-        # code length diff = len(hyponym:y) - len(hypernym:x)
-        y_pred = t_code_length_y - t_code_length_x
-
-        # scale ground-truth value and predicted value
-        if self._normalize_code_length:
-            # scale predicted value by the number of digits. then value range will be (-1, +1)
-            n_digits = t_prob_c_batch.shape[1]
-            y_pred /= n_digits
-            # scale ground-truth value by the user-specified value.
-            y_true *= self._normalize_coef_for_gt
-
-        loss = self._func_distance(y_pred, y_true)
-
-        return loss * self._scale
-
-
 class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
-    def __init__(self, scale: float = 1.0, normalize_hyponymy_score: bool = False, normalize_coefficient_for_ground_truth: float = 1.0,
-                 distance_metric: str = "scaled-mse",
+    def __init__(self, scale: float = 1.0, normalize_hyponymy_score: bool = False,
+                 distance_metric: str = "mse",
                  size_average=None, reduce=None, reduction='mean') -> None:
 
         super(HyponymyScoreLoss, self).__init__(scale=scale,
-                    normalize_coefficient_for_ground_truth=normalize_coefficient_for_ground_truth,
                     distance_metric=distance_metric,
                     size_average=size_average, reduce=reduce, reduction=reduction)
 
@@ -276,44 +243,9 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         # l_lca = length of the lowest common ancestor
         l_lca = self.calc_soft_lowest_common_ancestor_length(t_prob_c_x, t_prob_c_y)
 
-        score = alpha * (l_hypo - l_hyper) + (1. - (alpha + beta)) * (l_lca - l_hyper)
+        score = (alpha+beta) * (l_hypo - l_hyper) + (1. - (alpha + beta)) * (l_lca - l_hyper)
 
         return score
-
-    def forward(self, t_prob_c_batch: torch.Tensor, lst_hyponymy_tuple: List[Tuple[int, int, float]]) -> torch.Tensor:
-        """
-        evaluates loss of the predicted hyponymy score and true hyponymy score.
-
-        :param t_prob_c_batch: probability array. shape: (n_batch, n_digits, n_ary), t_prob_c_batch[b,n,m] = p(c_n=m|x_b)
-        :param lst_hyponymy_tuple: list of (hypernym index, hyponym index, hyponymy score) tuples
-        """
-
-        # x: hypernym, y: hyponym
-        dtype, device = self._dtype_and_device(t_prob_c_batch)
-
-        # clamp values so that it won't produce nan value.
-        t_prob_c_batch = torch.clamp(t_prob_c_batch, min=1E-5, max=(1.0-1E-5))
-
-        t_idx_x = torch.tensor([tup[0] for tup in lst_hyponymy_tuple], dtype=torch.long, device=device)
-        t_idx_y = torch.tensor([tup[1] for tup in lst_hyponymy_tuple], dtype=torch.long, device=device)
-        y_true = torch.tensor([tup[2] for tup in lst_hyponymy_tuple], dtype=dtype, device=device)
-
-        t_prob_c_x = torch.index_select(t_prob_c_batch, dim=0, index=t_idx_x)
-        t_prob_c_y = torch.index_select(t_prob_c_batch, dim=0, index=t_idx_y)
-
-        y_pred = self.calc_soft_hyponymy_score(t_prob_c_x, t_prob_c_y)
-
-        # scale ground-truth value and predicted value
-        if self._normalize_hyponymy_score:
-            # scale predicted value by the number of digits. then value range will be (-1, +1)
-            n_digits = t_prob_c_batch.shape[1]
-            y_pred /= n_digits
-            # scale ground-truth value by the user-specified value.
-            y_true *= self._normalize_coef_for_gt
-
-        loss = self._func_distance(y_pred, y_true)
-
-        return loss * self._scale
 
     def calc_synonym_probability(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
 
@@ -344,37 +276,32 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
         return t_prob
 
-
-class LowestCommonAncestorLengthPredictionLoss(HyponymyScoreLoss):
-
-    def forward(self, t_prob_c_batch: torch.Tensor, lst_hyponymy_tuple: List[Tuple[int, int, float]]) -> torch.Tensor:
+    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor) -> torch.Tensor:
         """
-        evaluates loss of the predicted and ground-truth value of the length of the lowest common ancestor.
+        evaluates loss of the predicted hyponymy score and true hyponymy score.
 
-        :param t_prob_c_batch: probability array. shape: (n_batch, n_digits, n_ary), t_prob_c_batch[b,n,m] = p(c_n=m|x_b)
-        :param lst_hyponymy_tuple: list of (hypernym index, hyponym index, length of lowest  common ancestor) tuples
+        :param input_code_probabilities: probability array. shape: (n_batch, n_digits, n_ary), t_prob_c_batch[b,n,m] = p(c_n=m|x_b)
+        :param target_codes: list of (hypernym index, hyponym index, hyponymy score) tuples
         """
-
         # x: hypernym, y: hyponym
-        dtype, device = self._dtype_and_device(t_prob_c_batch)
 
-        t_idx_x = torch.tensor([tup[0] for tup in lst_hyponymy_tuple], dtype=torch.long, device=device)
-        t_idx_y = torch.tensor([tup[1] for tup in lst_hyponymy_tuple], dtype=torch.long, device=device)
-        y_true = torch.tensor([tup[2] for tup in lst_hyponymy_tuple], dtype=dtype, device=device)
+        dtype, device = self._dtype_and_device(input_code_probabilities)
+        n_digits, n_ary = input_code_probabilities.shape[1:]
 
-        t_prob_c_x = torch.index_select(t_prob_c_batch, dim=0, index=t_idx_x)
-        t_prob_c_y = torch.index_select(t_prob_c_batch, dim=0, index=t_idx_y)
+        # clamp values so that it won't produce nan value.
+        t_prob_c_y = torch.clamp(input_code_probabilities, min=1E-5, max=(1.0 - 1E-5))
 
-        y_pred = self.calc_soft_lowest_common_ancestor_length(t_prob_c_x, t_prob_c_y)
+        # convert to one-hot encoding
+        t_prob_c_x = F.one_hot(target_codes, num_classes=n_ary).type(torch.float)
+
+        y_pred = self.calc_soft_hyponymy_score(t_prob_c_x, t_prob_c_y)
 
         # scale ground-truth value and predicted value
         if self._normalize_hyponymy_score:
             # scale predicted value by the number of digits. then value range will be (-1, +1)
-            n_digits = t_prob_c_batch.shape[1]
             y_pred /= n_digits
-            # scale ground-truth value by the user-specified value.
-            y_true *= self._normalize_coef_for_gt
 
+        y_true = torch.zeros_like(y_pred)
         loss = self._func_distance(y_pred, y_true)
 
         return loss * self._scale
@@ -383,51 +310,51 @@ class LowestCommonAncestorLengthPredictionLoss(HyponymyScoreLoss):
 class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
     def __init__(self, scale: float = 1.0, size_average=None, reduce=None, reduction='mean',
-                 loss_metric: str = "cross_entropy", focal_loss_gamma: float = 1.0, focal_loss_normalize_weight: bool = False) -> None:
+                 entailment_class_weight: float = 0.5,
+                 loss_metric: str = "cross_entropy",
+                 focal_loss_gamma: float = 1.0, focal_loss_normalize_weight: bool = False) -> None:
 
         super(EntailmentProbabilityLoss, self).__init__(scale=scale,
                     distance_metric="binary-cross-entropy",
                     size_average=size_average, reduce=reduce, reduction=reduction)
         accepted_loss_metric = ("cross_entropy", "focal_loss", "dice_loss")
         assert loss_metric in accepted_loss_metric, f"`loss_metric` must be one of these: {','.join(accepted_loss_metric)}"
+        self._entailment_class_weight = entailment_class_weight
         self._loss_metric = loss_metric
         self._focal_loss_gamma = focal_loss_gamma
         self._focal_loss_normalize_weight = focal_loss_normalize_weight
 
-    def forward(self, t_prob_c_batch: torch.Tensor, lst_hyponymy_tuple: List[Tuple[int, int, float]]) -> torch.Tensor:
+    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor, eps: float = 1E-5) -> torch.Tensor:
         """
         evaluates loss of the predicted hyponymy score and true hyponymy score.
 
-        :param t_prob_c_batch: probability array. shape: (n_batch, n_digits, n_ary), t_prob_c_batch[b,n,m] = p(c_n=m|x_b)
-        :param lst_hyponymy_tuple: list of (hypernym index, hyponym index, hyponymy score) tuples
+        :param input_code_probabilities: probability array. shape: (n_batch, n_digits, n_ary), t_prob_c_batch[b,n,m] = p(c_n=m|x_b)
+        :param target_codes: list of (hypernym index, hyponym index, hyponymy score) tuples
         """
+        # target_codes: hypernym(=x), input_code_probabilities: hyponym(=y)
 
-        # x: hypernym, y: hyponym
-        dtype, device = self._dtype_and_device(t_prob_c_batch)
+        dtype, device = self._dtype_and_device(input_code_probabilities)
+        n_ary = input_code_probabilities.shape[-1]
 
         # clamp values so that it won't produce nan value.
-        t_prob_c_batch = torch.clamp(t_prob_c_batch, min=1E-5, max=(1.0-1E-5))
+        t_prob_c_y = torch.clamp(input_code_probabilities, min=eps, max=(1.0 - eps))
 
-        t_idx_x = torch.tensor([tup[0] for tup in lst_hyponymy_tuple], dtype=torch.long, device=device)
-        t_idx_y = torch.tensor([tup[1] for tup in lst_hyponymy_tuple], dtype=torch.long, device=device)
-        y_hyponymy_score = torch.tensor([tup[2] for tup in lst_hyponymy_tuple], dtype=dtype, device=device)
+        # convert to one-hot encoding
+        t_prob_c_x = F.one_hot(target_codes, num_classes=n_ary).type(torch.float)
+        # t_prob_c_x = t_prob_c_x.clip(min=eps, max=(1.0-(self._n_ary-1)*eps))
 
-        t_prob_c_x = torch.index_select(t_prob_c_batch, dim=0, index=t_idx_x)
-        t_prob_c_y = torch.index_select(t_prob_c_batch, dim=0, index=t_idx_y)
-
+        # calculate entailment probabilities
         y_prob_entail = self.calc_ancestor_probability(t_prob_c_x, t_prob_c_y)
         y_prob_synonym = self.calc_synonym_probability(t_prob_c_x, t_prob_c_y)
         y_prob_other = 1.0 - (y_prob_entail+y_prob_synonym)
 
         # clamp values so that it won't produce nan value.
-        y_prob_entail = torch.clamp(y_prob_entail, min=1E-5, max=(1.0-1E-5))
-        y_prob_synonym = torch.clamp(y_prob_synonym, min=1E-5, max=(1.0-1E-5))
-        y_prob_other = torch.clamp(y_prob_other, min=1E-5, max=(1.0-1E-5))
+        # y_prob_entail = torch.clamp(y_prob_entail, min=eps, max=(1.0-eps))
+        # y_prob_synonym = torch.clamp(y_prob_synonym, min=eps, max=(1.0-eps))
+        # y_prob_other = torch.clamp(y_prob_other, min=eps, max=(1.0-eps))
 
         # pick up the probability based on the ground-truth class: {}.
-        y_probs = (y_hyponymy_score >= 1.0).float() * y_prob_entail + \
-                  (y_hyponymy_score == 0.0).float() * y_prob_synonym + \
-                  (y_hyponymy_score <= -1.0).float() * y_prob_other
+        y_probs = y_prob_synonym + self._entailment_class_weight * y_prob_entail
 
         if self._loss_metric == "cross_entropy": # cross-entropy loss
             y_weights = torch.ones_like(y_probs, dtype=dtype)
