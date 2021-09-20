@@ -82,7 +82,8 @@ class HierarchicalCodeEncoder(nn.Module):
             "global_attention_type": self.global_attention_type,
             "teacher_forcing": self.teacher_forcing,
             "has_discretizer": self.has_discretizer,
-            "discretizer.temperature": self.temperature
+            "discretizer.temperature": self.temperature,
+            "prob_zero_monotone_increasing": self._encoder._prob_zero_monotone_increasing
         }
         return ret
 

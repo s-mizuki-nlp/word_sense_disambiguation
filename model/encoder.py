@@ -47,7 +47,8 @@ class SimpleEncoder(nn.Module):
     def has_discretizer(self):
         return False
 
-    def _adjust_code_probability_to_monotone_increasing(self, probs: torch.Tensor, probs_prev: Union[None, torch.Tensor]):
+    def _adjust_code_probability_to_monotone_increasing(self, probs: torch.Tensor, probs_prev: Union[None, torch.Tensor],
+                                                        eps: float = 1E-6):
         # if Pr{C_{d-1}} is not given, we don't adjust the probability.
         if probs_prev is None:
             return probs
@@ -63,11 +64,12 @@ class SimpleEncoder(nn.Module):
 
         # probs_nonzero_*: (n_batch, n_ary-1)
         probs_nonzero = torch.index_select(probs, dim=-1, index=torch.arange(1, n_ary, dtype=torch.long, device=device))
-        adjust_factor = (1.0 - probs_zero_adj) / ((1.0 - probs_zero) + 1E-6)
+        adjust_factor = (1.0 - probs_zero_adj) / ((1.0 - probs_zero) + eps)
         probs_nonzero_adj = adjust_factor * probs_nonzero
 
         # concatenate adjusted probabilities
         probs_adj = torch.cat((probs_zero_adj, probs_nonzero_adj), dim=-1)
+        probs_adj = torch.clip(probs_adj, min=eps, max=1.0-eps)
 
         return probs_adj
 
@@ -79,7 +81,7 @@ class LSTMEncoder(SimpleEncoder):
                  n_dim_emb_code: Optional[int] = None,
                  teacher_forcing: bool = True,
                  apply_argmax_on_inference: bool = False,
-                 input_entity_vector: bool = True,
+                 input_entity_vector: bool = False,
                  discretizer: Optional[nn.Module] = None,
                  global_attention_type: Optional[str] = None,
                  code_embeddings_type: str = "time_distributed",
