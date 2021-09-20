@@ -44,7 +44,7 @@ class SimpleEncoder(nn.Module):
         return self.forward(input_x)
 
     @property
-    def use_built_in_discretizer(self):
+    def has_discretizer(self):
         return False
 
     def _adjust_code_probability_to_monotone_increasing(self, probs: torch.Tensor, probs_prev: Union[None, torch.Tensor]):
@@ -78,6 +78,7 @@ class LSTMEncoder(SimpleEncoder):
                  n_dim_hidden: Optional[int] = None,
                  n_dim_emb_code: Optional[int] = None,
                  teacher_forcing: bool = True,
+                 apply_argmax_on_inference: bool = False,
                  input_entity_vector: bool = True,
                  discretizer: Optional[nn.Module] = None,
                  global_attention_type: Optional[str] = None,
@@ -89,8 +90,15 @@ class LSTMEncoder(SimpleEncoder):
 
         super(SimpleEncoder, self).__init__()
 
+        if teacher_forcing:
+            if discretizer is not None:
+                warnings.warn("discretizer will not be used when `teacher_forcing` is enabled.")
+            discretizer = None
+        else:
+            if discretizer is None:
+                warnings.warn("student forcing will be applied without stochastic sampling.")
+
         self._discretizer = discretizer
-        self._is_discretize_code_probability = discretizer is not None
         self._n_dim_emb = n_dim_emb
         self._n_dim_emb_code = n_dim_emb if n_dim_emb_code is None else n_dim_emb_code
         self._n_dim_hidden = n_dim_emb if n_dim_hidden is None else n_dim_hidden
@@ -100,6 +108,7 @@ class LSTMEncoder(SimpleEncoder):
         self._n_ary_internal = None
         self._global_attention_type = global_attention_type
         self._teacher_forcing = teacher_forcing
+        self._apply_argmax_on_inference = apply_argmax_on_inference
         self._input_entity_vector = input_entity_vector
         self._code_embeddings_type = code_embeddings_type
         self._trainable_beginning_of_code = trainable_beginning_of_code
@@ -120,15 +129,15 @@ class LSTMEncoder(SimpleEncoder):
         self._lstm_cell = nn.LSTMCell(input_size=input_size, hidden_size=self._n_dim_hidden, bias=True)
 
         # y_t -> e_{t+1}; t=0,1,...,N_d-2
+        ## embedding for beginning-of-code
         if self._trainable_beginning_of_code:
-            # reserve last index as the embedding of the beginning of code (BOC).
-            self._n_code_embeddings = self._n_ary + 1
-        else:
-            self._n_code_embeddings = self._n_ary
+            init_value = torch.full((self._n_dim_emb_code,), dtype=torch.float, fill_value=0.01)
+            self._embedding_code_boc = nn.Parameter(init_value, requires_grad=True)
+        ## embeddings for specific values
         if self._code_embeddings_type == "time_distributed": # e_t = Embed(o_t;\theta)
-            self._embedding_code = nn.Linear(in_features=self._n_code_embeddings, out_features=self._n_dim_emb_code, bias=False)
+            self._embedding_code = nn.Linear(in_features=self._n_ary, out_features=self._n_dim_emb_code, bias=False)
         elif self._code_embeddings_type == "time_dependent": # e_t = Embed(o_t;\theta_t)
-            lst_layers = [nn.Linear(in_features=self._n_code_embeddings, out_features=self._n_dim_emb_code, bias=False) for _ in range(self._n_digits-1)]
+            lst_layers = [nn.Linear(in_features=self._n_ary, out_features=self._n_dim_emb_code, bias=False) for _ in range(self._n_digits-1)]
             self._embedding_code = nn.ModuleList(lst_layers)
         else:
             raise AssertionError(f"unknown `code_embeddings_type` value: {self._code_embeddings_type}")
@@ -160,18 +169,14 @@ class LSTMEncoder(SimpleEncoder):
         c_0 = torch.zeros((n_batch, self._n_dim_hidden), dtype=dtype, device=device)
 
         if self._trainable_beginning_of_code:
-            t_idx_boc = torch.full(size=(n_batch,), fill_value=self._n_ary, device=device)
-            if self._code_embeddings_type == "time_distributed":
-                e_0 = self._embedding_code(F.one_hot(t_idx_boc).type(torch.float))
-            elif self._code_embeddings_type == "time_dependent":
-                e_0 = self._embedding_code[0](F.one_hot(t_idx_boc))
+            e_0 = torch.tile(self._embedding_code_boc, (n_batch, 1) ).to(device)
         else:
             e_0 = torch.zeros((n_batch, self._n_dim_emb_code), dtype=dtype, device=device)
 
         return h_0, c_0, e_0
 
     def forward(self, entity_vectors: torch.Tensor,
-                ground_truth_synset_codes: torch.Tensor = None,
+                ground_truth_synset_codes: Optional[torch.Tensor] = None,
                 context_embeddings: Optional[torch.Tensor] = None,
                 context_sequence_lengths: Optional[torch.Tensor] = None,
                 init_states: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
@@ -188,8 +193,10 @@ class LSTMEncoder(SimpleEncoder):
         dtype, device = self._dtype_and_device(entity_vectors)
         n_batch = entity_vectors.shape[0]
 
-        if ground_truth_synset_codes is not None:
-            ground_truth_synset_codes = F.one_hot(ground_truth_synset_codes, num_classes=self._n_code_embeddings).type(torch.float)
+        if on_inference:
+            ground_truth_synset_codes = None
+        elif ground_truth_synset_codes is not None:
+            ground_truth_synset_codes = F.one_hot(ground_truth_synset_codes, num_classes=self._n_ary).type(torch.float)
 
         # initialize variables
         lst_prob_c = []
@@ -225,29 +232,34 @@ class LSTMEncoder(SimpleEncoder):
                 prob_c_prev = lst_prob_c[-1] if len(lst_prob_c) > 0 else None
                 t_prob_c_d = self._adjust_code_probability_to_monotone_increasing(probs=t_prob_c_d, probs_prev=prob_c_prev)
 
-            # branch on training or on inference
-
+            # compute the relaxed code of current digit: c_d
             if on_inference:
-                t_latent_code_d = t_prob_c_d
-                # empirically, embedding based on the probability produces better result then argmax.
-                # I guess it minimizes difference on training and inference.
-                # t_latent_code_d = F.one_hot(t_prob_c_d.argmax(dim=-1), num_classes=self._n_ary).type(dtype)
+                if self._apply_argmax_on_inference:
+                    t_latent_code_d = F.one_hot(t_prob_c_d.argmax(dim=-1), num_classes=self._n_ary).type(dtype)
+                else:
+                    # empirically, embedding based on the probability produces better result then argmax.
+                    # I guess it minimizes difference on training and inference.
+                    t_latent_code_d = t_prob_c_d
             else:
-                ## sample code
-                if self._is_discretize_code_probability:
+                ## on training -> stochastic sampling if discretizer is available.
+                if self.has_discretizer:
                     t_latent_code_d = self._discretizer(t_prob_c_d)
                 else:
                     t_latent_code_d = t_prob_c_d
 
             # compute the embeddings of previous code
             if d != (self._n_digits - 1):
-                if self._teacher_forcing:
-                    # teacher forcing
-                    # o_d = input_y[:, d, :]
-                    o_d = torch.index_select(ground_truth_synset_codes, dim=1, index=torch.tensor(d, device=device)).squeeze()
-                else:
-                    # student forcing (detached previous output)
+                if on_inference:
                     o_d = t_latent_code_d.detach()
+                else:
+                    # on training
+                    if self._teacher_forcing:
+                        # teacher forcing
+                        # o_d = input_y[:, d, :]
+                        o_d = torch.index_select(ground_truth_synset_codes, dim=1, index=torch.tensor(d, device=device)).squeeze()
+                    else:
+                        # student forcing (detached previous output)
+                        o_d = t_latent_code_d.detach()
 
                 # calculate embeddings
                 if self._code_embeddings_type == "time_distributed":
@@ -272,11 +284,11 @@ class LSTMEncoder(SimpleEncoder):
         return t_latent_code, t_prob_c
 
     @property
-    def use_built_in_discretizer(self):
-        return self._is_discretize_code_probability
+    def has_discretizer(self):
+        return self._discretizer is not None
 
     @property
-    def built_in_discretizer(self):
+    def discretizer(self):
         return self._discretizer
 
     @property
