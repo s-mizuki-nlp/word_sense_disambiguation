@@ -309,20 +309,68 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
 class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
-    def __init__(self, scale: float = 1.0, size_average=None, reduce=None, reduction='mean',
-                 entailment_class_weight: float = 0.5,
+    def __init__(self, scale: float = 1.0,
+                 synonym_probability_weight: Optional[float] = None,
+                 label_smoothing_factor: Optional[float] = None,
+                 size_average=None, reduce=None, reduction='mean',
                  loss_metric: str = "cross_entropy",
                  focal_loss_gamma: float = 1.0, focal_loss_normalize_weight: bool = False) -> None:
+        """
+        compute entailment/synonymy proabbility-based loss between code probabilities and ground-truth codes.
 
+        @param scale: scaling coefficient of the total loss.
+        @param synonym_probability_weight: relative weight of the synonymy class probs. DEFAULT: None (=0.0)
+        @param label_smoothing_factor: smoothing factor of the one-hot encoding of ground-truth codes. DEFAULT: None (=disabled)
+        @param size_average: deprecated.
+        @param reduce: deprecated.
+        @param reduction: redunction method of sample losses.
+        @param loss_metric: sample-wise weighting method. DEFUALT: cross-entropy (=uniform weights)
+        @param focal_loss_gamma: hyper-paramer of focal loss weighting method.
+        @param focal_loss_normalize_weight:
+        """
         super(EntailmentProbabilityLoss, self).__init__(scale=scale,
                     distance_metric="binary-cross-entropy",
                     size_average=size_average, reduce=reduce, reduction=reduction)
         accepted_loss_metric = ("cross_entropy", "focal_loss", "dice_loss")
         assert loss_metric in accepted_loss_metric, f"`loss_metric` must be one of these: {','.join(accepted_loss_metric)}"
-        self._entailment_class_weight = entailment_class_weight
+        self._label_smoothing_factor = label_smoothing_factor
+        self._synonym_probability_weight = 0.0 if synonym_probability_weight is None else synonym_probability_weight
         self._loss_metric = loss_metric
         self._focal_loss_gamma = focal_loss_gamma
         self._focal_loss_normalize_weight = focal_loss_normalize_weight
+
+    def _cross_entropy_loss(self, y_log_probs: torch.Tensor):
+        dtype, device = self._dtype_and_device(y_log_probs)
+        y_weights = torch.ones_like(y_log_probs, dtype=dtype, device=device)
+        loss = -1.0 * y_weights * y_log_probs
+        return loss
+
+    def _focal_loss(self, y_log_probs: torch.Tensor):
+        y_weights = (1.0 - y_log_probs) ** self._focal_loss_gamma
+        if self._focal_loss_normalize_weight:
+            y_weights = len(y_log_probs) * y_weights / torch.sum(y_weights)
+        loss = -1.0 * y_weights * y_log_probs
+        return loss
+
+    def _dice_loss(self, y_probs: torch.Tensor):
+        gamma = 1.0
+        adjusted_y_probs = ((1.0 - y_probs)**self._focal_loss_gamma) * y_probs
+        loss = 1.0 - (2. * adjusted_y_probs + gamma) / (adjusted_y_probs + 1 + gamma)
+        return loss
+
+    def _compute_loss(self, y_probs: torch.Tensor, log:bool = False):
+        y_log_probs = torch.log(y_probs) if not log else y_probs
+
+        if self._loss_metric == "cross_entropy": # cross-entropy loss
+            losses = self._cross_entropy_loss(y_log_probs)
+        elif self._loss_metric == "focal_loss": # focal loss
+            losses = self._focal_loss(y_log_probs)
+        elif self._loss_metric == "dice_loss": # dice loss [Li+, 2020]
+            losses = self._dice_loss(torch.exp(y_log_probs))
+        else:
+            raise NotImplementedError(f"unknown loss metric: {self._loss_metric}")
+        return losses
+
 
     def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor, eps: float = 1E-5) -> torch.Tensor:
         """
@@ -341,9 +389,12 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
         # convert to one-hot encoding
         t_prob_c_x = F.one_hot(target_codes, num_classes=n_ary).type(torch.float)
-        # t_prob_c_x = t_prob_c_x.clip(min=eps, max=(1.0-(self._n_ary-1)*eps))
+        if self._label_smoothing_factor is not None:
+            max_prob = 1.0 - self._label_smoothing_factor
+            min_prob = self._label_smoothing_factor / (n_ary - 1)
+            t_prob_c_x = torch.clamp(t_prob_c_x, min=min_prob, max=max_prob)
 
-        # calculate entailment probabilities
+        # calculate {entailment, synonym, other} probabilities
         y_prob_entail = self.calc_ancestor_probability(t_prob_c_x, t_prob_c_y)
         y_prob_synonym = self.calc_synonym_probability(t_prob_c_x, t_prob_c_y)
         y_prob_other = 1.0 - (y_prob_entail+y_prob_synonym)
@@ -353,33 +404,20 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
         # y_prob_synonym = torch.clamp(y_prob_synonym, min=eps, max=(1.0-eps))
         # y_prob_other = torch.clamp(y_prob_other, min=eps, max=(1.0-eps))
 
-        # pick up the probability based on the ground-truth class: {}.
-        y_probs = y_prob_synonym + self._entailment_class_weight * y_prob_entail
+        # compute the entailment probability as the objective.
+        w = self._synonym_probability_weight
+        y_log_probs = (1.0 - w) * torch.log(y_prob_entail) + w * torch.log(y_prob_synonym)
 
-        if self._loss_metric == "cross_entropy": # cross-entropy loss
-            y_weights = torch.ones_like(y_probs, dtype=dtype)
-            loss_i = -1.0 * y_weights * torch.log(y_probs)
-
-        elif self._loss_metric == "focal_loss": # focal loss
-            y_weights = (1.0 - y_probs)**self._focal_loss_gamma
-            if self._focal_loss_normalize_weight:
-                y_weights = len(y_probs) * y_weights / torch.sum(y_weights)
-            loss_i = -1.0 * y_weights * torch.log(y_probs)
-
-        elif self._loss_metric == "dice_loss": # dice loss [Li+, 2020]
-            gamma = 1.0
-            adjusted_y_probs = ((1.0 - y_probs)**self._focal_loss_gamma) * y_probs
-            loss_i = 1.0 - (2. * adjusted_y_probs + gamma) / (adjusted_y_probs + 1 + gamma)
-        else:
-            raise NotImplementedError(f"unknown loss metric: {self._loss_metric}")
+        # compute loss using various sample-wise weighting methods (e.g., focal loss)
+        losses = self._compute_loss(y_log_probs, log=True)
 
         # reduction
         if self.reduction == "sum":
-            loss = torch.sum(loss_i)
+            loss = torch.sum(losses)
         elif self.reduction.endswith("mean"):
-            loss = torch.mean(loss_i)
+            loss = torch.mean(losses)
         elif self.reduction == "none":
-            loss = loss_i
+            loss = losses
 
         return loss * self._scale
 
