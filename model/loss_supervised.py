@@ -445,6 +445,20 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
             raise NotImplementedError(f"unknown loss metric: {self._loss_metric}")
         return losses
 
+    def calc_log_null_probability(self, t_prob_c: torch.Tensor, eps=1E-15) -> torch.Tensor:
+        """
+        calculate log probability of all code is zero. this probability may be useful for avoiding local minima.
+
+        @param t_prob_c: code probability distribution.
+        """
+        # t_p_c_*_zero: (n_batch, n_digits)
+        idx_zero = torch.tensor(0, device=t_prob_c.device)
+        t_p_c_zero = torch.index_select(t_prob_c_x, dim=-1, index=idx_zero).squeeze()
+
+        # t_log_prob: (n_batch,)
+        t_log_prob = torch.sum(torch.log(t_p_c_zero+eps), dim=-1)
+
+        return t_log_prob
 
     def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor, eps: float = 1E-5) -> torch.Tensor:
         """
