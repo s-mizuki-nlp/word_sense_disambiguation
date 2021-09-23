@@ -497,7 +497,8 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
         # compute the entailment probability as the objective.
         w = self._synonym_probability_weight
-        y_log_probs = (1.0 - w) * y_log_prob_entail + w * y_log_prob_synonym
+        # y_log_probs = (1.0 - w) * y_log_prob_entail + w * y_log_prob_synonym
+        y_log_probs = (1.0 - w) * torch.log(y_prob_entail) + w * torch.log(y_prob_synonym)
 
         # compute loss using various sample-wise weighting methods (e.g., focal loss)
         losses = self._compute_loss(y_log_probs, log=True)
