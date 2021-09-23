@@ -451,9 +451,9 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
         @param t_prob_c: code probability distribution.
         """
-        # t_p_c_*_zero: (n_batch, n_digits)
+        # t_p_c_zero: (n_batch, n_digits)
         idx_zero = torch.tensor(0, device=t_prob_c.device)
-        t_p_c_zero = torch.index_select(t_prob_c_x, dim=-1, index=idx_zero).squeeze()
+        t_p_c_zero = torch.index_select(t_prob_c, dim=-1, index=idx_zero).squeeze()
 
         # t_log_prob: (n_batch,)
         t_log_prob = torch.sum(torch.log(t_p_c_zero+eps), dim=-1)
@@ -497,8 +497,7 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
         # compute the entailment probability as the objective.
         w = self._synonym_probability_weight
-        # y_log_probs = (1.0 - w) * y_log_prob_entail + w * y_log_prob_synonym
-        y_log_probs = (1.0 - w) * torch.log(y_prob_entail) + w * torch.log(y_prob_synonym)
+        y_log_probs = (1.0 - w) * y_log_prob_entail + w * y_log_prob_synonym
 
         # compute loss using various sample-wise weighting methods (e.g., focal loss)
         losses = self._compute_loss(y_log_probs, log=True)
