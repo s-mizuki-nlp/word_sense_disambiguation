@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 from typing import List, Tuple, Optional, Dict
+import warnings
 
 import torch
 from torch import nn
@@ -384,7 +385,8 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
     def __init__(self, scale: float = 1.0,
-                 synonym_probability_weight: Optional[float] = None,
+                 entail_probability_weight: float = 1.0,
+                 synonym_probability_weight: float = 0.0,
                  label_smoothing_factor: Optional[float] = None,
                  size_average=None, reduce=None, reduction='mean',
                  loss_metric: str = "cross_entropy",
@@ -407,8 +409,12 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
                     size_average=size_average, reduce=reduce, reduction=reduction)
         accepted_loss_metric = ("cross_entropy", "focal_loss", "dice_loss")
         assert loss_metric in accepted_loss_metric, f"`loss_metric` must be one of these: {','.join(accepted_loss_metric)}"
+        if label_smoothing_factor is not None:
+            warnings.warn("label smoothing may not work due to local minima. use with caution.")
+
         self._label_smoothing_factor = label_smoothing_factor
-        self._synonym_probability_weight = 0.0 if synonym_probability_weight is None else synonym_probability_weight
+        self._entail_probability_weight = entail_probability_weight
+        self._synonym_probability_weight = synonym_probability_weight
         self._loss_metric = loss_metric
         self._focal_loss_gamma = focal_loss_gamma
         self._focal_loss_normalize_weight = focal_loss_normalize_weight
@@ -496,9 +502,8 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
         # y_prob_other = torch.clamp(y_prob_other, min=eps, max=(1.0-eps))
 
         # compute the entailment probability as the objective.
-        w = self._synonym_probability_weight
-        # y_log_probs = (1.0 - w) * y_log_prob_entail + w * y_log_prob_synonym
-        y_log_probs = (1.0 - w) * torch.log(y_prob_entail) + w * torch.log(y_prob_synonym)
+        # y_log_probs = self._entail_probability_weight * y_log_prob_entail + self._synonym_probability_weight * y_log_prob_synonym
+        y_log_probs = self._entail_probability_weight * torch.log(y_prob_entail) + self._synonym_probability_weight * torch.log(y_prob_synonym)
 
         # compute loss using various sample-wise weighting methods (e.g., focal loss)
         losses = self._compute_loss(y_log_probs, log=True)
