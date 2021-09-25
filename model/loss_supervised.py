@@ -184,13 +184,14 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
     def _calc_break_intensity(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
         # x: hypernym, y: hyponym
+        n_digits, n_ary = t_prob_c_x.shape[1:]
 
         # t_p_c_*_zero: (n_batch, n_digits)
-        idx_zero = torch.tensor(0, device=t_prob_c_x.device)
-        t_p_c_x_zero = torch.index_select(t_prob_c_x, dim=-1, index=idx_zero).squeeze()
-        t_p_c_y_zero = torch.index_select(t_prob_c_y, dim=-1, index=idx_zero).squeeze()
+        idx_nonzero = torch.tensor(range(1, n_ary), device=t_prob_c_x.device)
+        t_p_c_x_nonzero = torch.index_select(t_prob_c_x, dim=-1, index=idx_nonzero)
+        t_p_c_y_nonzero = torch.index_select(t_prob_c_y, dim=-1, index=idx_nonzero)
 
-        ret = 1.0 - (torch.sum(t_prob_c_x * t_prob_c_y, dim=-1) - t_p_c_x_zero * t_p_c_y_zero)
+        ret = 1.0 - torch.sum(t_p_c_x_nonzero * t_p_c_y_nonzero, dim=-1)
         return ret
 
     def calc_ancestor_probability(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
@@ -269,13 +270,14 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         l_hyper = self.calc_soft_code_length(t_prob_c_x)
         l_hypo = self.calc_soft_code_length(t_prob_c_y)
         # alpha = probability of hyponymy relation
-        alpha = self.calc_ancestor_probability(t_prob_c_x, t_prob_c_y)
+        # alpha = self.calc_ancestor_probability(t_prob_c_x, t_prob_c_y)
         # beta = probability of identity relation
-        beta = self.calc_synonym_probability(t_prob_c_x, t_prob_c_y)
+        # beta = self.calc_synonym_probability(t_prob_c_x, t_prob_c_y)
         # l_lca = length of the lowest common ancestor
         l_lca = self.calc_soft_lowest_common_ancestor_length(t_prob_c_x, t_prob_c_y)
 
-        score = (alpha+beta) * (l_hypo - l_hyper) + (1. - (alpha + beta)) * (l_lca - l_hyper)
+        # score = alpha * (l_hypo - l_hyper) + (1. - (alpha + beta)) * (l_lca - l_hyper)
+        score = 2.*l_lca - (l_hyper + l_hypo)
 
         return score
 
