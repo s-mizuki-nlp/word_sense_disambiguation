@@ -174,6 +174,7 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
     def __init__(self, scale: float = 1.0, normalize_hyponymy_score: bool = False,
                  distance_metric: str = "mse",
+                 label_smoothing_factor: Optional[float] = None,
                  size_average=None, reduce=None, reduction='mean') -> None:
 
         super(HyponymyScoreLoss, self).__init__(scale=scale,
@@ -181,6 +182,23 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
                     size_average=size_average, reduce=reduce, reduction=reduction)
 
         self._normalize_hyponymy_score = normalize_hyponymy_score
+        self._label_smooting_factor = label_smoothing_factor
+
+    def _one_hot_encoding(self, t_codes: torch.Tensor, n_ary: int, label_smoothing_factor: Optional[float] = None) -> torch.Tensor:
+        """
+        apply one-hot encoding and optionally label smoothing.
+
+        @param t_codes:
+        @param n_ary:
+        @param label_smoothing_factor:
+        @return:
+        """
+        t_one_hots = F.one_hot(t_codes, num_classes=n_ary).type(torch.float)
+        if label_smoothing_factor is not None:
+            max_prob = 1.0 - self._label_smoothing_factor
+            min_prob = self._label_smoothing_factor / (n_ary - 1)
+            t_one_hots = torch.clip(t_one_hots, min=min_prob, max=max_prob)
+        return t_one_hots
 
     def _calc_break_intensity(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
         # x: hypernym, y: hyponym
@@ -353,7 +371,7 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
         return t_log_prob
 
-    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor) -> torch.Tensor:
+    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor, eps=1E-7) -> torch.Tensor:
         """
         evaluates loss of the predicted hyponymy score and true hyponymy score.
 
@@ -366,10 +384,10 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         n_digits, n_ary = input_code_probabilities.shape[1:]
 
         # clamp values so that it won't produce nan value.
-        t_prob_c_y = torch.clamp(input_code_probabilities, min=1E-5, max=(1.0 - 1E-5))
+        t_prob_c_y = torch.clamp(input_code_probabilities, min=eps, max=(1.0 - eps))
 
         # convert to one-hot encoding
-        t_prob_c_x = F.one_hot(target_codes, num_classes=n_ary).type(torch.float)
+        t_prob_c_x = self._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=self._label_smooting_factor)
 
         y_pred = self.calc_soft_hyponymy_score(t_prob_c_x, t_prob_c_y)
 
@@ -483,12 +501,8 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
         # clamp values so that it won't produce nan value.
         t_prob_c_y = torch.clamp(input_code_probabilities, min=eps, max=(1.0 - eps))
 
-        # convert to one-hot encoding
-        t_prob_c_x = F.one_hot(target_codes, num_classes=n_ary).type(torch.float)
-        if self._label_smoothing_factor is not None:
-            max_prob = 1.0 - self._label_smoothing_factor
-            min_prob = self._label_smoothing_factor / (n_ary - 1)
-            t_prob_c_x = torch.clip(t_prob_c_x, min=min_prob, max=max_prob)
+        # one-hot encoding and optionally label smoothing
+        t_prob_c_x = self._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=self._label_smoothing_factor)
 
         # calculate {entailment, synonym, other} probabilities
         # y_log_prob_entail = self.calc_log_ancestor_probability(t_prob_c_x, t_prob_c_y)
