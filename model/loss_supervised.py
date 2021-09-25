@@ -182,7 +182,7 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
                     size_average=size_average, reduce=reduce, reduction=reduction)
 
         self._normalize_hyponymy_score = normalize_hyponymy_score
-        self._label_smooting_factor = label_smoothing_factor
+        self._label_smoothing_factor = label_smoothing_factor
 
     def _one_hot_encoding(self, t_codes: torch.Tensor, n_ary: int, label_smoothing_factor: Optional[float] = None) -> torch.Tensor:
         """
@@ -195,8 +195,8 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         """
         t_one_hots = F.one_hot(t_codes, num_classes=n_ary).type(torch.float)
         if label_smoothing_factor is not None:
-            max_prob = 1.0 - self._label_smoothing_factor
-            min_prob = self._label_smoothing_factor / (n_ary - 1)
+            max_prob = 1.0 - label_smoothing_factor
+            min_prob = label_smoothing_factor / (n_ary - 1)
             t_one_hots = torch.clip(t_one_hots, min=min_prob, max=max_prob)
         return t_one_hots
 
