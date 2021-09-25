@@ -387,7 +387,7 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         t_prob_c_y = torch.clamp(input_code_probabilities, min=eps, max=(1.0 - eps))
 
         # convert to one-hot encoding
-        t_prob_c_x = self._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=self._label_smooting_factor)
+        t_prob_c_x = self._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=self._label_smoothing_factor)
 
         y_pred = self.calc_soft_hyponymy_score(t_prob_c_x, t_prob_c_y)
 
