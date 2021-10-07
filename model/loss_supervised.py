@@ -35,6 +35,8 @@ class CodeLengthPredictionLoss(L._Loss):
             self._m = nn.BatchNorm1d(1)
         elif distance_metric == "mae":
             self._func_distance = self._mae
+        elif distance_metric == "weighted-mae":
+            self._func_distance = self._mae
         elif distance_metric == "scaled-mae":
             self._func_distance = self._scaled_mae
         elif distance_metric == "cosine":
@@ -103,6 +105,17 @@ class CodeLengthPredictionLoss(L._Loss):
 
     def _mae(self, u, v) -> torch.Tensor:
         return F.l1_loss(u, v, reduction=self.reduction)
+
+    def _weighted_mae(self, u, v) -> torch.Tensor:
+        errors = torch.abs(u - v)
+        weights = errors / (errors.sum() + 1E-7)
+        losses = weights * errors
+        if self.reduction == "mean":
+            return torch.mean(losses)
+        elif self.reduction == "sum":
+            return torch.sum(losses)
+        elif self.reduction == "none":
+            return losses
 
     def _scaled_mae(self, u, v) -> torch.Tensor:
         return F.l1_loss(self._scale_dynamic(u), self._scale_dynamic(v), reduction=self.reduction)
