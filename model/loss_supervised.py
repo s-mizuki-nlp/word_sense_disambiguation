@@ -138,6 +138,9 @@ class CodeLengthPredictionLoss(L._Loss):
         return F.binary_cross_entropy(u, v, reduction=self.reduction)
 
     def _intensity_to_probability(self, t_intensity):
+        return torch.exp(self._intensity_to_log_probability(t_intensity))
+
+    def _intensity_to_log_probability(self, t_intensity, eps=1E-15):
         # t_intensity can be either one or two dimensional tensor.
         dtype, device = self._dtype_and_device(t_intensity)
         pad_shape = t_intensity.shape[:-1] + (1,)
@@ -145,20 +148,30 @@ class CodeLengthPredictionLoss(L._Loss):
         t_pad_begin = torch.zeros(pad_shape, dtype=dtype, device=device)
         t_pad_end = torch.ones(pad_shape, dtype=dtype, device=device)
 
-        t_prob = torch.cumprod(1.0 - torch.cat((t_pad_begin, t_intensity), dim=-1), dim=-1) * torch.cat((t_intensity, t_pad_end), dim=-1)
+        t_nonbreak_probs = 1.0 - torch.cat((t_pad_begin, t_intensity), dim=-1)
+        t_break_probs = torch.cat((t_intensity, t_pad_end), dim=-1)
 
-        return t_prob
+        t_log_prob = torch.log(t_break_probs + eps) + torch.cumsum( torch.log(t_nonbreak_probs + eps), dim=-1 )
+
+        return t_log_prob
 
     def calc_soft_code_length(self, t_prob_c: torch.Tensor):
-        t_p_c_zero = torch.index_select(t_prob_c, dim=-1, index=torch.tensor(0, device=t_prob_c.device)).squeeze()
-        n_digits = t_p_c_zero.shape[-1]
+        return torch.exp(self.calc_log_soft_code_length(t_prob_c))
+
+    def calc_log_soft_code_length(self, t_prob_c: torch.Tensor):
         dtype, device = self._dtype_and_device(t_prob_c)
+        n_digits, n_ary = t_prob_c.shape[1:]
 
-        t_p_at_n = self._intensity_to_probability(t_p_c_zero)
-        t_at_n = torch.arange(n_digits+1, dtype=dtype, device=device)
+        t_idx_zero = torch.tensor(0, device=device)
+        t_p_c_zero = torch.index_select(t_prob_c, dim=-1, index=t_idx_zero).squeeze()
 
-        ret = torch.sum(t_p_at_n * t_at_n, dim=-1)
-        return ret
+        t_log_prob_break = self._intensity_to_log_probability(t_p_c_zero)
+        idx_nonzero = torch.tensor(range(1, n_digits+1), device=device)
+        t_log_prob_break_nonzero = torch.index_select(t_log_prob_break, dim=-1, index=idx_nonzero)
+        t_at_n = torch.arange(1, n_digits+1, dtype=dtype, device=device).unsqueeze(dim=0)
+
+        t_log_length = torch.logsumexp(torch.log(t_at_n) + t_log_prob_break_nonzero, dim=-1)
+        return t_log_length
 
     def forward(self, t_prob_c_batch: torch.Tensor, lst_code_length_tuple: List[Tuple[int, float]]) -> torch.Tensor:
         """
@@ -197,6 +210,8 @@ class CodeLengthPredictionLoss(L._Loss):
 class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
     def __init__(self, scale: float = 1.0, normalize_hyponymy_score: bool = False,
+                 log_scale: bool = False,
+                 margin_on_code_length_penalty: float = 0.0,
                  distance_metric: str = "mse",
                  label_smoothing_factor: Optional[float] = None,
                  size_average=None, reduce=None, reduction='mean') -> None:
@@ -207,6 +222,8 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
         self._normalize_hyponymy_score = normalize_hyponymy_score
         self._label_smoothing_factor = label_smoothing_factor
+        self._log_scale = log_scale
+        self._margin_on_code_length_penalty = margin_on_code_length_penalty
 
     def _one_hot_encoding(self, t_codes: torch.Tensor, n_ary: int, label_smoothing_factor: Optional[float] = None) -> torch.Tensor:
         """
@@ -291,38 +308,24 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
         return t_log_prob
 
-    def calc_soft_lowest_common_ancestor_length(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
+    def calc_log_soft_lowest_common_ancestor_length(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
         n_digits, n_ary = t_prob_c_x.shape[-2:]
         dtype, device = self._dtype_and_device(t_prob_c_x)
 
         t_break_intensity = self._calc_break_intensity(t_prob_c_x, t_prob_c_y)
-        t_prob_break = self._intensity_to_probability(t_break_intensity)
+        # t_log_prob_break: (n_batch, n_digits+1)
+        t_log_prob_break = self._intensity_to_log_probability(t_break_intensity)
 
-        t_at_n = torch.arange(n_digits+1, dtype=dtype, device=device)
-        ret = torch.sum(t_prob_break * t_at_n, dim=-1)
+        # t_log_prob_break_nonzero: (n_batch, n_digits) = t_log_prob_break[:,1:]
+        idx_nonzero = torch.tensor(range(1, n_digits+1), device=t_prob_c_x.device)
+        t_log_prob_break_nonzero = torch.index_select(t_log_prob_break, dim=-1, index=idx_nonzero)
 
-        return ret
+        # t_at_n: (1, n_digits)
+        t_at_n = torch.arange(1, n_digits+1, dtype=dtype, device=device).unsqueeze(dim=0)
+        # t_log_lca: (n_batch,); t_log_lca[b] = E_{N~Pr{N|x}}[N]
+        t_log_lca = torch.logsumexp(torch.log(t_at_n) + t_log_prob_break_nonzero, dim=-1)
 
-    def calc_soft_hyponymy_score(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
-        # calculate soft hyponymy score
-        # x: hypernym, y: hyponym
-        # t_prob_c_*[b,n,v] = Pr{C_n=v|x_b}; t_prob_c_*: (n_batch, n_digits, n_ary)
-
-        # l_hyper, l_hypo = hypernym / hyponym code length
-        l_hyper = self.calc_soft_code_length(t_prob_c_x)
-        l_hypo = self.calc_soft_code_length(t_prob_c_y)
-        # alpha = probability of hyponymy relation
-        # alpha = self.calc_ancestor_probability(t_prob_c_x, t_prob_c_y)
-        # beta = probability of identity relation
-        # beta = self.calc_synonym_probability(t_prob_c_x, t_prob_c_y)
-        # l_lca = length of the lowest common ancestor
-        l_lca = self.calc_soft_lowest_common_ancestor_length(t_prob_c_x, t_prob_c_y)
-
-        # score = alpha * (l_hypo - l_hyper) + (1. - (alpha + beta)) * (l_lca - l_hyper)
-        # score = 2.*l_lca - (l_hyper + l_hypo)
-        score = l_lca - l_hyper
-
-        return score
+        return t_log_lca
 
     def calc_synonym_probability(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
 
@@ -396,6 +399,29 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
         return t_log_prob
 
+    def calc_soft_hyponymy_score(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor, log: bool = False):
+        # calculate soft hyponymy score
+        # x: hypernym, y: hyponym
+        # t_prob_c_*[b,n,v] = Pr{C_n=v|x_b}; t_prob_c_*: (n_batch, n_digits, n_ary)
+
+        # l_ground_truth, l_prediction = code lengths of the ground truth and predicted ones.
+        l_ground_truth = self.calc_log_soft_code_length(t_prob_c_x)
+        l_prediction = self.calc_log_soft_code_length(t_prob_c_y)
+        l_lca = self.calc_log_soft_lowest_common_ancestor_length(t_prob_c_x, t_prob_c_y)
+
+        if log:
+           pass
+        else:
+            l_ground_truth = torch.exp(l_ground_truth)
+            l_prediction = torch.exp(l_prediction)
+            l_lca = torch.exp(l_lca)
+
+        # score = | lca - l_gt | + max(0, l_pred - l_gt - margin)
+        score = torch.abs(l_lca - l_ground_truth) + \
+                torch.clip(l_prediction - l_ground_truth - self._margin_on_code_length_penalty, min=0.0)
+
+        return score
+
     def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor, eps=1E-7) -> torch.Tensor:
         """
         evaluates loss of the predicted hyponymy score and true hyponymy score.
@@ -414,7 +440,7 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         # convert to one-hot encoding
         t_prob_c_x = self._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=self._label_smoothing_factor)
 
-        y_pred = self.calc_soft_hyponymy_score(t_prob_c_x, t_prob_c_y)
+        y_pred = self.calc_soft_hyponymy_score(t_prob_c_x, t_prob_c_y, log=self._log_scale)
 
         # scale ground-truth value and predicted value
         if self._normalize_hyponymy_score:
