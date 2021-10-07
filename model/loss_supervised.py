@@ -30,8 +30,8 @@ class CodeLengthPredictionLoss(L._Loss):
             self._func_distance = self._auto_scaled_mse
         elif distance_metric == "positive-autoscaled-mse":
             self._func_distance = self._positive_auto_scaled_mse
-        elif distance_metric == "batchnorm-mse":
-            self._func_distance = self._batchnorm_mse
+        elif distance_metric == "weighted-mse":
+            self._func_distance = self._weighted_mse
             self._m = nn.BatchNorm1d(1)
         elif distance_metric == "mae":
             self._func_distance = self._mae
@@ -68,6 +68,17 @@ class CodeLengthPredictionLoss(L._Loss):
 
     def _mse(self, u, v) -> torch.Tensor:
         return F.mse_loss(u, v, reduction=self.reduction)
+
+    def _weighted_mse(self, u, v) -> torch.Tensor:
+        errors = (u - v)**2
+        weights = errors / (errors.sum() + 1E-7)
+        losses = weights * errors
+        if self.reduction == "mean":
+            return torch.mean(losses)
+        elif self.reduction == "sum":
+            return torch.sum(losses)
+        elif self.reduction == "none":
+            return losses
 
     def _scaled_mse(self, u, v) -> torch.Tensor:
         return F.mse_loss(self._scale_dynamic(u), self._scale_dynamic(v), reduction=self.reduction)
@@ -295,7 +306,8 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         l_lca = self.calc_soft_lowest_common_ancestor_length(t_prob_c_x, t_prob_c_y)
 
         # score = alpha * (l_hypo - l_hyper) + (1. - (alpha + beta)) * (l_lca - l_hyper)
-        score = 2.*l_lca - (l_hyper + l_hypo)
+        # score = 2.*l_lca - (l_hyper + l_hypo)
+        score = l_lca - l_hyper
 
         return score
 
