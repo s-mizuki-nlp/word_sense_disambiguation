@@ -1,47 +1,51 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
-from __future__ import absolute_import
-from __future__ import unicode_literals
-from __future__ import division
-from __future__ import print_function
 
 import sys, io, os
-from dataset import word_embeddings
 
-DIR_WORD_EMBEDDINGS = "/home/sakae/Windows/public_model/embedding/"
+DIR_TRAIN_UNSUPERVISED = "/home/sakae/Windows/dataset/word_sense_disambiguation/monosemous_word_annotated_corpus/bert_embeddings/"
+DIR_TRAIN = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Training_Corpora/bert_embeddings/"
+DIR_EVAL = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Evaluation_Framework/bert_embeddings/"
 
-cfg_word_embeddings = {
-    "Word2Vec-google-news": {
-        "path_word2vec_format":os.path.join(DIR_WORD_EMBEDDINGS, "word2vec-google-news-300/word2vec-google-news-300"),
-        "binary":True,
-        "init_sims":False,
-        "transform":None,
-        "enable_phrase_composition":True
+cfg_evaluation = {
+    "WSDEval-all": {
+        "path":os.path.join(DIR_EVAL, "bert-large-cased_wsdeval-all.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "filter_function":None,
+        "description": "BERT-large-cased. WSD Evaluation Framework dataset [Raganato+, 2017]"
+    }
+}
+
+cfg_training = {
+    "wikitext103": {
+        "path":os.path.join(DIR_TRAIN_UNSUPERVISED, "bert-base-cased_wikitext103_train_freq=10-100_len=6-128.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "description": "BERT-base-cased. Wikitext-103 trainset, freq=10~100, length=6~128."
     },
-    "fastText-wiki-news": {
-        "path_fasttext_binary_format":os.path.join(DIR_WORD_EMBEDDINGS, "fasttext-wiki-news-300/wiki-news-300d-1M-subword.bin"),
-        "transform":None,
-        "enable_phrase_composition":True,
-        "norm":True
+    "wiki40b-first-paragraph": {
+        "path":os.path.join(DIR_TRAIN_UNSUPERVISED, "bert-base-cased_wiki40b-train-first-paragraph_freq=10-100_len=6-128.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "description": "BERT-base-cased. Wiki40b trainset first paragraph, freq=10~100, length=6~128."
     },
-    "Word2Vec-GloVe-wiki-gigaword": {
-        "path_word2vec_format":os.path.join(DIR_WORD_EMBEDDINGS, "glove-wiki-gigaword-200/glove-wiki-gigaword-200.gz"),
-        "binary":True,
-        "init_sims":False,
-        "transform":None,
-        "enable_phrase_composition":True
+    "wiki40b-all": {
+        "path":os.path.join(DIR_TRAIN_UNSUPERVISED, "bert-large-cased_wiki40b-train-all-paragraph_freq=10-100_len=6-128.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "description": "BERT-large-cased. Wiki40b trainset, freq=10~100, length=6~128."
     },
-    "General-word2vec-umbc-sample": {
-        "path_numpy_array_binary_format":os.path.join(DIR_WORD_EMBEDDINGS, "word2vec-umbc-corpus-sample/w2v_cased_200_win5_sgns1.npy"),
-        "path_vocabulary_text":os.path.join(DIR_WORD_EMBEDDINGS, "word2vec-umbc-corpus-sample/w2v_cased_200_win5_sgns1.vocab"),
-        "transform":None,
-        "enable_phrase_composition":True
+    "wiki40b-all-ext": {
+        "path":os.path.join(DIR_TRAIN_UNSUPERVISED, "bert-large-cased_wiki40b-train-all-paragraph_freq=10-200_len=6-128.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "description": "BERT-large-cased. Wiki40b trainset, freq=10~200, length=6~128."
     },
-    "Word2Vec-encow16ax-cased": {
-        "path_word2vec_format":os.path.join(DIR_WORD_EMBEDDINGS, "word2vec-encow16ax-corpus/w2v_gensim_vector_cased_100_win5_min10_neg15_sgns1.bin"),
-        "mmap":"r",
-        "init_sims":False,
-        "transform":None,
-        "enable_phrase_composition":True
+    "SemCor": {
+        "path":os.path.join(DIR_TRAIN, "NOT_YET_AVAILABLE.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "description": "BERT-large-cased. SemCor corpus."
     }
 }
