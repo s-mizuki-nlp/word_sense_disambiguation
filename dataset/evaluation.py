@@ -72,7 +72,7 @@ class WSDEvaluationDataset(Dataset):
         lst_candidates = []
         for lemma in lst_lemmas:
             dict_candidate = {
-                "lemma_sense_key": lemma.key(),
+                "lemma_key": lemma.key(),
                 "synset": lemma.synset().name(),
                 "lexname": lemma.synset().lexname(),
             }
@@ -85,9 +85,12 @@ class WSDEvaluationDataset(Dataset):
             "id": _id,
             "lemma": instance_node.get("lemma"),
             "pos_orig": instance_node.get("pos"),
-            "pos": utils_wordnet.universal_tagset_to_wordnet_tagset(instance_node.get("pos")),
-            "ground_truth_senses": self._ground_truth_labels[_id]
+            "pos": utils_wordnet.universal_tagset_to_wordnet_tagset(instance_node.get("pos"))
         }
+        lst_lemma_keys = self._ground_truth_labels[_id]
+        lst_synset_ids = [wn.lemma_from_key(lemma_key).synset().name() for lemma_key in lst_lemma_keys]
+        dict_output["ground_truth_lemma_keys"] = lst_lemma_keys
+        dict_output["ground_truth_synset_ids"] = lst_synset_ids
 
         if self._lookup_candidate_senses:
             dict_output["candidate_senses"] = self._lookup_candidate_senses_from_wordnet(lemma=dict_output["lemma"], pos=dict_output["pos"])

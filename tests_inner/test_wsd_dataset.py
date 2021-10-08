@@ -106,8 +106,8 @@ class WSDEvaluationDatasetTestCases(unittest.TestCase):
         for record in self._dataset:
             for entity in record["entities"]:
                 with self.subTest(sentence_id=record["sentence_id"]):
-                    ground_truths = set(entity["ground_truth_senses"])
-                    candidates = set([c["lemma_sense_key"] for c in entity["candidate_senses"]])
+                    ground_truths = set(entity["ground_truth_lemma_keys"])
+                    candidates = set([c["lemma_key"] for c in entity["candidate_senses"]])
                     self.assertTrue(ground_truths.issubset(candidates))
                     self.assertGreater(len(candidates), 0)
 
@@ -116,7 +116,7 @@ class WSDEvaluationDatasetTestCases(unittest.TestCase):
         expected = set(lemma.key() for lemma in lst_lemmas)
 
         lst_candidates = self._dataset._lookup_candidate_senses_from_wordnet(lemma="cat", pos="n")
-        actual = set(c["lemma_sense_key"] for c in lst_candidates)
+        actual = set(c["lemma_key"] for c in lst_candidates)
 
         self.assertSetEqual(expected, actual)
 
