@@ -38,6 +38,7 @@ class NDJSONDataset(AbstractFormatDataset, IterableDataset):
         for record in iter_records:
             obj = json.loads(record, **self._kwargs_for_json_loads)
             yield obj
+        iter_records.close()
 
     def _record_loader_binary(self):
         iter_records = utils.iter_read_pickled_object(self._path)
