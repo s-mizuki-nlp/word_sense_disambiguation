@@ -206,6 +206,9 @@ class WSDEvaluationDataset(Dataset):
                 return True
         return False
 
+    def __getitem__(self, index):
+        return self._records[index]
+
     def __iter__(self):
         if isinstance(self._transform_functions, dict):
             for field_name, function in self._transform_functions.items():
