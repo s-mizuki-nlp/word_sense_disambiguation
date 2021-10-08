@@ -1,12 +1,10 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
-
-from typing import Optional, Iterable, Tuple, Set, Type, List, Dict, Callable, Union, Any
-from collections import defaultdict, Counter
 import warnings
-import numpy as np
-import math
+from typing import Optional, Iterable, Tuple, Set, Type, List, Dict, Callable, Union, Any
+
 from torch.utils.data import Dataset
+from nltk.corpus import wordnet as wn
 
 from .corpora import NDJSONDataset
 from .filter import DictionaryFilter
@@ -110,10 +108,15 @@ class LemmaDataset(NDJSONDataset, Dataset):
         return len(self.pos_tagset)
 
     @property
+    def n_lemma_and_pos(self):
+        return len(self.lemma_and_pos)
+
+    @property
     def verbose(self):
         v = super().verbose
         v["synset_code_n_digits"] = self.synset_code_n_digits
         v["synset_code_n_ary"] = self.synset_code_n_ary
+        v["n_lemma_and_pos"] = self.n_lemma_and_pos
         v["n_lemma"] = self.n_lemma
         v["n_pos"] = self.n_pos
         v["monosemous_entity_only"] = self._monosemous_entity_only
@@ -128,6 +131,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
                  transform_functions=None,
                  filter_function: Optional[Union[Callable, List[Callable]]] = None,
                  n_rows: Optional[int] = None,
+                 lookup_lemma_keys: bool = False,
                  description: str = "",
                  **kwargs_for_json_loads):
 
@@ -138,18 +142,44 @@ class SynsetDataset(NDJSONDataset, Dataset):
 
         super().__init__(path, binary, transform_functions, filter_function, n_rows, description, **kwargs_for_json_loads)
         self._lemma_lowercase = lemma_lowercase
+        self._lookup_lemma_keys = lookup_lemma_keys
 
         self._synsets = self._setup_lexical_knowledge()
+
+    def _synset_code_to_lookup_key(self, synset_code: List[int]):
+        return "-".join(map(str, synset_code))
 
     def _setup_lexical_knowledge(self) -> Dict[str, Any]:
         result = {}
         for record in self:
-            key = record["id"]
-            result[key] = record
+            if self._lookup_lemma_keys:
+                record["lemma_keys"] = self.lookup_lemma_keys(record["id"])
+
+            key_id = record["id"]
+            key_code = self._synset_code_to_lookup_key(record["code"])
+            result[key_id] = record
+            result[key_code] = record
+
         return result
 
-    def __getitem__(self, synset_id: str):
-        return self._synsets[synset_id]
+    def __getitem__(self, synset_id_or_synset_code: Union[str, List[int]]):
+        if isinstance(synset_id_or_synset_code, str):
+            return self._synsets[synset_id_or_synset_code]
+        elif isinstance(synset_id_or_synset_code, list):
+            key = self._synset_code_to_lookup_key(synset_id_or_synset_code)
+            return self._synsets[key]
+        else:
+            raise ValueError(f"unknown key type: {type(synset_id_or_synset_code)}")
+
+    def lookup_lemma_keys(self, synset_id: str):
+        try:
+            synset = wn.synset(synset_id)
+            lst_lemmas = synset.lemmas()
+            lst_ret = [lemma.key() for lemma in lst_lemmas]
+        except Exception as e:
+            warnings.warn(f"{e}")
+            lst_ret = []
+        return lst_ret
 
     def get_parent_synset(self, synset_id: str):
         parent_synset_id = self[synset_id]["parent_synset_id"]
