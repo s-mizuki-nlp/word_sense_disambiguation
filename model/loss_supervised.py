@@ -156,7 +156,8 @@ class CodeLengthPredictionLoss(L._Loss):
         return t_log_prob
 
     def calc_soft_code_length(self, t_prob_c: torch.Tensor):
-        return torch.exp(self.calc_log_soft_code_length(t_prob_c))
+        log_length = self.calc_log_soft_code_length(t_prob_c)
+        return torch.exp(log_length)
 
     def calc_log_soft_code_length(self, t_prob_c: torch.Tensor):
         dtype, device = self._dtype_and_device(t_prob_c)
@@ -254,28 +255,8 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         return ret
 
     def calc_ancestor_probability(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
-        n_digits, n_ary = t_prob_c_x.shape[-2:]
-        dtype, device = self._dtype_and_device(t_prob_c_x)
-
-        # t_p_c_*_zero: (n_batch, n_digits)
-        idx_zero = torch.tensor(0, device=t_prob_c_x.device)
-        t_p_c_x_zero = torch.index_select(t_prob_c_x, dim=-1, index=idx_zero).squeeze()
-        t_p_c_y_zero = torch.index_select(t_prob_c_y, dim=-1, index=idx_zero).squeeze()
-        # t_beta: (n_batch, n_digits)
-        t_beta = t_p_c_x_zero*(1.- t_p_c_y_zero)
-
-        # t_gamma_hat: (n_batch, n_digits)
-        t_gamma_hat = torch.sum(t_prob_c_x*t_prob_c_y, dim=-1) - t_p_c_x_zero*t_p_c_y_zero
-        # prepend 1.0 at the beginning
-        # pad_shape: (n_batch, 1)
-        pad_shape = t_gamma_hat.shape[:-1] + (1,)
-        t_pad_begin = torch.ones(pad_shape, dtype=dtype, device=device)
-        # t_gamma: (n_batch, n_digits)
-        t_gamma = torch.narrow(torch.cat((t_pad_begin, t_gamma_hat), dim=-1), dim=-1, start=0, length=n_digits)
-        # t_prob: (n_batch,)
-        t_prob = torch.sum(t_beta*torch.cumprod(t_gamma, dim=-1), dim=-1)
-
-        return t_prob
+        log_probs = self.calc_log_ancestor_probability(t_prob_c_x, t_prob_c_y)
+        return torch.exp(log_probs)
 
     def calc_log_ancestor_probability(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor, eps=1E-15):
         n_digits, n_ary = t_prob_c_x.shape[-2:]
@@ -283,8 +264,8 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
         # t_p_c_*_zero: (n_batch, n_digits)
         idx_zero = torch.tensor(0, device=t_prob_c_x.device)
-        t_p_c_x_zero = torch.index_select(t_prob_c_x, dim=-1, index=idx_zero).squeeze()
-        t_p_c_y_zero = torch.index_select(t_prob_c_y, dim=-1, index=idx_zero).squeeze()
+        t_p_c_x_zero = torch.index_select(t_prob_c_x, dim=-1, index=idx_zero).squeeze(dim=-1)
+        t_p_c_y_zero = torch.index_select(t_prob_c_y, dim=-1, index=idx_zero).squeeze(dim=-1)
 
         # t_p_c_*_nonzero: (n_batch, n_digits, n_ary-1)
         idx_nonzero = torch.tensor(range(1,n_ary), device=device)
@@ -328,39 +309,8 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         return t_log_lca
 
     def calc_synonym_probability(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
-
-        n_digits, n_ary = t_prob_c_x.shape[-2:]
-        dtype, device = self._dtype_and_device(t_prob_c_x)
-
-        # t_p_c_*_zero: (n_batch, n_digits)
-        idx_zero = torch.tensor(0, device=device)
-        t_p_c_x_zero = torch.index_select(t_prob_c_x, dim=-1, index=idx_zero).squeeze()
-        t_p_c_y_zero = torch.index_select(t_prob_c_y, dim=-1, index=idx_zero).squeeze()
-
-        # t_p_c_*_nonzero: (n_batch, n_digits, n_ary-1)
-        idx_nonzero = torch.tensor(range(1,n_ary), device=device)
-        t_p_c_x_nonzero = torch.index_select(t_prob_c_x, dim=-1, index=idx_nonzero)
-        t_p_c_y_nonzero = torch.index_select(t_prob_c_y, dim=-1, index=idx_nonzero)
-
-        # t_gamma_hat: (n_batch, n_digits)
-        # t_gamma_hat = torch.sum(t_prob_c_x*t_prob_c_y, dim=-1) - t_p_c_x_zero*t_p_c_y_zero
-        t_gamma_hat = torch.sum(t_p_c_x_nonzero*t_p_c_y_nonzero, dim=-1)
-        # prepend 1.0 at the beginning
-        # pad_shape: (n_batch, 1)
-        pad_shape = t_gamma_hat.shape[:-1] + (1,)
-        t_pad_ones = torch.ones(pad_shape, dtype=dtype, device=device)
-        # t_gamma: (n_batch, n_digits+1)
-        t_gamma = torch.cat((t_pad_ones, t_gamma_hat), dim=-1)
-
-        # t_delta: (n_batch, n_digits)
-        t_delta_hat = t_p_c_x_zero*t_p_c_y_zero
-        # append 1.0 at the end.
-        t_delta = torch.cat((t_delta_hat, t_pad_ones), dim=-1)
-
-        # t_prob: (n_batch)
-        t_prob = torch.sum(t_delta*torch.cumprod(t_gamma, dim=-1), dim=-1)
-
-        return t_prob
+        log_probs = self.calc_log_synonym_probability(t_prob_c_x, t_prob_c_y)
+        return torch.exp(log_probs)
 
     def calc_log_synonym_probability(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor, eps=1E-15):
 
@@ -369,8 +319,8 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
         # t_p_c_*_zero: (n_batch, n_digits)
         idx_zero = torch.tensor(0, device=device)
-        t_p_c_x_zero = torch.index_select(t_prob_c_x, dim=-1, index=idx_zero).squeeze()
-        t_p_c_y_zero = torch.index_select(t_prob_c_y, dim=-1, index=idx_zero).squeeze()
+        t_p_c_x_zero = torch.index_select(t_prob_c_x, dim=-1, index=idx_zero).squeeze(dim=-1)
+        t_p_c_y_zero = torch.index_select(t_prob_c_y, dim=-1, index=idx_zero).squeeze(dim=-1)
 
         # t_p_c_*_nonzero: (n_batch, n_digits, n_ary-1)
         idx_nonzero = torch.tensor(range(1,n_ary), device=device)
@@ -399,15 +349,15 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
         return t_log_prob
 
-    def calc_soft_hyponymy_score(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor, log: bool = False):
+    def calc_soft_hyponymy_score(self, t_prob_c_gt: torch.Tensor, t_prob_c_pred: torch.Tensor, log: bool = False):
         # calculate soft hyponymy score
         # x: hypernym, y: hyponym
         # t_prob_c_*[b,n,v] = Pr{C_n=v|x_b}; t_prob_c_*: (n_batch, n_digits, n_ary)
 
         # l_ground_truth, l_prediction = code lengths of the ground truth and predicted ones.
-        l_ground_truth = self.calc_log_soft_code_length(t_prob_c_x)
-        l_prediction = self.calc_log_soft_code_length(t_prob_c_y)
-        l_lca = self.calc_log_soft_lowest_common_ancestor_length(t_prob_c_x, t_prob_c_y)
+        l_ground_truth = self.calc_log_soft_code_length(t_prob_c_gt)
+        l_prediction = self.calc_log_soft_code_length(t_prob_c_pred)
+        l_lca = self.calc_log_soft_lowest_common_ancestor_length(t_prob_c_gt, t_prob_c_pred)
 
         if log:
            pass
@@ -537,7 +487,7 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
         return t_log_prob
 
-    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor, eps: float = 1E-5) -> torch.Tensor:
+    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor, eps: float = 1E-7) -> torch.Tensor:
         """
         evaluates loss of the predicted hyponymy score and true hyponymy score.
 
@@ -556,21 +506,12 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
         t_prob_c_x = self._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=self._label_smoothing_factor)
 
         # calculate {entailment, synonym, other} probabilities
-        # y_log_prob_entail = self.calc_log_ancestor_probability(t_prob_c_x, t_prob_c_y)
-        # y_log_prob_synonym = self.calc_log_synonym_probability(t_prob_c_x, t_prob_c_y)
-        # y_prob_other = 1.0 - (torch.exp(y_log_prob_entail) + torch.exp(y_log_prob_synonym))
-        y_prob_entail = self.calc_ancestor_probability(t_prob_c_x, t_prob_c_y)
-        y_prob_synonym = self.calc_synonym_probability(t_prob_c_x, t_prob_c_y)
-        y_prob_other = 1.0 - (y_prob_entail + y_prob_synonym)
-
-        # clamp values so that it won't produce nan value.
-        # y_prob_entail = torch.clamp(y_prob_entail, min=eps, max=(1.0-eps))
-        # y_prob_synonym = torch.clamp(y_prob_synonym, min=eps, max=(1.0-eps))
-        # y_prob_other = torch.clamp(y_prob_other, min=eps, max=(1.0-eps))
+        y_log_prob_entail = self.calc_log_ancestor_probability(t_prob_c_x, t_prob_c_y)
+        y_log_prob_synonym = self.calc_log_synonym_probability(t_prob_c_x, t_prob_c_y)
+        y_log_prob_other = torch.log(1.0 - (torch.exp(y_log_prob_entail) + torch.exp(y_log_prob_synonym)) + eps)
 
         # compute the entailment probability as the objective.
-        # y_log_probs = self._entail_probability_weight * y_log_prob_entail + self._synonym_probability_weight * y_log_prob_synonym
-        y_log_probs = self._entail_probability_weight * torch.log(y_prob_entail) + self._synonym_probability_weight * torch.log(y_prob_synonym)
+        y_log_probs = self._entail_probability_weight * y_log_prob_entail + self._synonym_probability_weight * y_log_prob_synonym
 
         # compute loss using various sample-wise weighting methods (e.g., focal loss)
         losses = self._compute_loss(y_log_probs, log=True)
