@@ -9,13 +9,23 @@ import os
 from dataset.transform import FieldTypeConverter
 
 DIR_EVALSET = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Evaluation_Framework/Evaluation_Datasets/"
+DIR_TRAINSET = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Training_Corpora/"
 
 # evaluation dataset for all-words WSD task
-word_sense_disambiguation = {
+cfg_evaluation = {
     "ALL": {
         "path_corpus": os.path.join(DIR_EVALSET, "ALL/ALL.data.xml"),
         "path_ground_truth_labels": os.path.join(DIR_EVALSET, "ALL/ALL.gold.key.txt"),
         "lookup_candidate_senses": True,
         "description": "WSD dataset: ALL",
+    }
+}
+
+cfg_training = {
+    "SemCor": {
+        "path_corpus": os.path.join(DIR_TRAINSET, "SemCor/semcor.data.xml"),
+        "path_ground_truth_labels": os.path.join(DIR_TRAINSET, "SemCor/semcor.gold.key.txt"),
+        "lookup_candidate_senses": True,
+        "description": "WSD SemCor corpora",
     }
 }
