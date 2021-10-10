@@ -24,6 +24,8 @@ def calc_lowest_common_ancestor_length(vec_x, vec_y):
             break
     return ret
 
+batch_calc_lowest_common_ancestor_length = np.vectorize(calc_lowest_common_ancestor_length, signature='(b),(b)->()')
+
 def is_hypernymy_relation(vec_x, vec_y):
     for x, y in zip(vec_x, vec_y):
         if (x == 0) and (y != 0):
