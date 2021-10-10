@@ -372,7 +372,7 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
         return score
 
-    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor, eps=1E-7) -> torch.Tensor:
+    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor, eps: float = 1E-15) -> torch.Tensor:
         """
         evaluates loss of the predicted hyponymy score and true hyponymy score.
 
@@ -487,7 +487,7 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
         return t_log_prob
 
-    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor, eps: float = 1E-7) -> torch.Tensor:
+    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor, eps: float = 1E-15) -> torch.Tensor:
         """
         evaluates loss of the predicted hyponymy score and true hyponymy score.
 
