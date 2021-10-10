@@ -236,6 +236,7 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         @return:
         """
         t_one_hots = F.one_hot(t_codes, num_classes=n_ary).type(torch.float)
+        label_smoothing_factor = self._label_smoothing_factor if label_smoothing_factor is None else label_smoothing_factor
         if label_smoothing_factor is not None:
             max_prob = 1.0 - label_smoothing_factor
             min_prob = label_smoothing_factor / (n_ary - 1)
@@ -307,6 +308,9 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         t_log_lca = torch.logsumexp(torch.log(t_at_n) + t_log_prob_break_nonzero, dim=-1)
 
         return t_log_lca
+
+    def calc_soft_lowest_common_ancestor_length(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
+        return self.calc_log_soft_lowest_common_ancestor_length(t_prob_c_x, t_prob_c_y)
 
     def calc_synonym_probability(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
         log_probs = self.calc_log_synonym_probability(t_prob_c_x, t_prob_c_y)
