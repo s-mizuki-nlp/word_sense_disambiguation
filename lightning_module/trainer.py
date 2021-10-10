@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 from __future__ import division
 from __future__ import print_function
 
-from typing import Optional, Dict, Callable
+from typing import Optional, Dict, Callable, Union
 import warnings
 from collections import defaultdict
 import pickle
@@ -18,37 +18,37 @@ from torch.nn.modules.loss import _Loss
 from torch.optim import Adam
 import pytorch_lightning as pl
 
-from sam.sam import SAM
-
-from model.core import MaskedAutoEncoder
-from model.loss_supervised import HyponymyScoreLoss, CodeLengthPredictionLoss
+from model import HierarchicalCodeEncoder
+from model.loss_supervised import HyponymyScoreLoss, EntailmentProbabilityLoss, CrossEntropyLossWrapper
 
 
 class UnsupervisedTrainer(pl.LightningModule):
 
     def __init__(self,
-                 model: MaskedAutoEncoder,
-                 loss_reconst: _Loss,
-                 loss_mutual_info: Optional[_Loss] = None,
+                 model: HierarchicalCodeEncoder,
+                 loss_supervised: Union[HyponymyScoreLoss, EntailmentProbabilityLoss, CrossEntropyLossWrapper],
                  dataloader_train: Optional[DataLoader] = None,
                  dataloader_val: Optional[DataLoader] = None,
                  dataloader_test: Optional[DataLoader] = None,
                  learning_rate: Optional[float] = 0.001,
+                 optimizer_class: Optional[Optimizer] = None,
+                 use_sampled_code_repr_for_loss_computation: bool = False,
                  model_parameter_schedulers: Optional[Dict[str, Callable[[float], float]]] = None,
-                 loss_parameter_schedulers: Optional[Dict[str, Dict[str, Callable[[float], float]]]] = None,
-                 optimizer_class: Optional[Optimizer] = None
+                 loss_parameter_schedulers: Optional[Dict[str, Callable[[float], float]]] = None
                  ):
 
-        super(UnsupervisedTrainer, self).__init__()
+        super().__init__()
 
-        self._scale_loss_reconst = loss_reconst.scale
-        self._scale_loss_mi = loss_mutual_info.scale if loss_mutual_info is not None else 1.
+        self._use_sampled_code_repr_for_loss_computation = use_sampled_code_repr_for_loss_computation
+
+        self._loss_supervised = loss_supervised
+        self._scale_loss_supervised = loss_supervised.scale
 
         self._model = model
         self._encoder = model._encoder
-        self._decoder = model._decoder
-        self._loss_reconst = loss_reconst
-        self._loss_mutual_info = loss_mutual_info
+        self.n_ary = model.n_ary
+        self.n_digits = model.n_digits
+
         self._learning_rate = learning_rate
         self._dataloaders = {
             "train": dataloader_train,
@@ -85,61 +85,18 @@ class UnsupervisedTrainer(pl.LightningModule):
             opt = self._optimizer_class(params=self.parameters(), lr=self._learning_rate)
         return opt
 
-    def _asssign_null_collate_function(self, dataloader: Optional[DataLoader]):
-        if dataloader is None:
-            return dataloader
-        if (dataloader.collate_fn is None) or (dataloader.collate_fn is default_collate):
-            warnings.warn("update collate_fn with null function.")
-            dataloader.collate_fn = lambda v:v
-        return dataloader
-
-    @pl.data_loader
-    def tng_dataloader(self):
-        self._dataloaders["train"] = self._asssign_null_collate_function(self._dataloaders["train"])
+    def train_dataloader(self):
         return self._dataloaders["train"]
 
-    @pl.data_loader
     def val_dataloader(self):
-        self._dataloaders["val"] = self._asssign_null_collate_function(self._dataloaders["val"])
         return self._dataloaders["val"]
 
-    @pl.data_loader
     def test_dataloader(self):
-        self._dataloaders["test"] = self._asssign_null_collate_function(self._dataloaders["test"])
         return self._dataloaders["test"]
 
     def forward(self, x):
-        return self._model.forward(x)
-
-    def training_step(self, data_batch, batch_nb):
-
-        current_step = self.trainer.global_step / (self.trainer.max_nb_epochs * self.trainer.total_batches)
-        self._update_model_parameters(current_step, verbose=False)
-        self._update_loss_parameters(current_step, verbose=False)
-
-        if isinstance(data_batch, list):
-            data_batch = data_batch[0]
-
-        # forward computation
-        t_x = torch.tensor(data_batch["embedding"], dtype=torch.float32, device=self._get_model_device()).squeeze(dim=0)
-        t_latent_code, t_code_prob, t_x_dash = self._model.forward(t_x)
-
-        # (required) reconstruction loss
-        loss_reconst = self._loss_reconst.forward(t_x_dash, t_x)
-
-        if self._loss_mutual_info is not None:
-            loss_mi = self._loss_mutual_info(t_code_prob)
-        else:
-            loss_mi = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device)
-
-        loss = loss_reconst + loss_mi
-
-        dict_losses = {
-            "train_loss_reconst": loss_reconst / self._scale_loss_reconst,
-            "train_loss_mutual_info": loss_mi / self._scale_loss_mi,
-            "train_loss": loss
-        }
-        return {"loss":loss, "log": dict_losses}
+        t_codes, t_code_probs = self._model.forward(x)
+        return t_codes, t_code_probs
 
     def _evaluate_code_stats(self, t_code_prob):
 
@@ -154,31 +111,6 @@ class UnsupervisedTrainer(pl.LightningModule):
             "val_code_probability_divergence":torch.mean(code_probability_divergence)
         }
         return metrics
-
-    def validation_step(self, data_batch, batch_nb):
-
-        # forward computation without back-propagation
-        t_x = torch.tensor(data_batch[0]["embedding"], dtype=torch.float32, device=self._get_model_device()).squeeze(dim=0)
-        t_intermediate, t_code_prob, t_x_dash = self._model._predict(t_x)
-
-        loss_reconst = self._loss_reconst.forward(t_x_dash, t_x)
-        if self._loss_mutual_info is not None:
-            loss_mi = self._loss_mutual_info(t_code_prob)
-        else:
-            loss_mi = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device)
-
-        loss = loss_reconst + loss_mi
-
-        metrics = {
-            "val_loss_reconst": loss_reconst / self._scale_loss_reconst,
-            "val_mutual_info": loss_mi / self._scale_loss_mi,
-            "val_loss": loss
-        }
-        # if self._loss_mutual_info is not None:
-        metrics_repr = self._evaluate_code_stats(t_code_prob)
-        metrics.update(metrics_repr)
-
-        return {"val_loss":loss, "log":metrics}
 
     def validation_end(self, outputs):
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
@@ -227,20 +159,13 @@ class UnsupervisedTrainer(pl.LightningModule):
 
     @classmethod
     def fix_missing_attributes(cls, model):
-        # fix for #9f6ec90, #fbf51f8, #d882d6f, #cd01f68, #d4f59fa
         if getattr(model._encoder, "internal_layer_class_type", None) is None:
-            if model._encoder.__class__.__name__ == "AutoRegressiveLSTMEncoder":
-                if not hasattr(model._encoder, "_input_transformation"):
-                    setattr(model._encoder, "_input_transformation", "time_distributed")
-                if not hasattr(model._encoder, "_prob_zero_monotone_increasing"):
-                    setattr(model._encoder, "_prob_zero_monotone_increasing", False)
-                if not hasattr(model._encoder, "_output_embedding"):
-                    setattr(model._encoder, "_output_embedding", "time_distributed")
+            if model._encoder.__class__.__name__ == "LSTMEncoder":
+                pass
             elif model._encoder.__class__.__name__ == "TransformerEncoder":
-                if not hasattr(model._encoder, "_prob_zero_monotone_increasing"):
-                    setattr(model._encoder, "_prob_zero_monotone_increasing", False)
+                pass
             else:
-                model._encoder._internal_layer_class_type = model._encoder.lst_h_to_z[0].__class__.__name__
+                pass
 
         return model
 
@@ -288,180 +213,68 @@ class UnsupervisedTrainer(pl.LightningModule):
                 if verbose:
                     print(f"{loss_name}.{property_name}: {current_value:.2f} -> {new_value:.2f}")
 
-
-    def on_epoch_start(self):
-        pass
-
-
-class SupervisedTrainer(UnsupervisedTrainer):
-
-    def __init__(self,
-                 model: MaskedAutoEncoder,
-                 loss_hyponymy: HyponymyScoreLoss,
-                 loss_mutual_info: Optional[_Loss] = None,
-                 loss_non_hyponymy: Optional[HyponymyScoreLoss] = None,
-                 loss_code_length: Optional[CodeLengthPredictionLoss] = None,
-                 dataloader_train: Optional[DataLoader] = None,
-                 dataloader_val: Optional[DataLoader] = None,
-                 dataloader_test: Optional[DataLoader] = None,
-                 learning_rate: Optional[float] = 0.001,
-                 optimizer_class: Optional[Optimizer] = None,
-                 use_intermediate_representation: bool = False,
-                 model_parameter_schedulers: Optional[Dict[str, Callable[[float], float]]] = None,
-                 loss_parameter_schedulers: Optional[Dict[str, Callable[[float], float]]] = None,
-                 shuffle_hyponymy_dataset_on_every_epoch: bool = True
-                 ):
-
-        super().__init__(model, loss_reconst, loss_mutual_info, dataloader_train, dataloader_val, dataloader_test, learning_rate,
-                         model_parameter_schedulers, loss_parameter_schedulers, optimizer_class)
-
-        self._use_intermediate_representation = use_intermediate_representation
-        self._loss_hyponymy = loss_hyponymy
-        self._loss_non_hyponymy = loss_non_hyponymy
-        self._loss_code_length = loss_code_length
-
-        self._scale_loss_hyponymy = loss_hyponymy.scale
-        self._scale_loss_non_hyponymy = loss_non_hyponymy.scale if loss_non_hyponymy is not None else loss_hyponymy.scale
-        self._scale_loss_code_length = loss_code_length.scale if loss_code_length is not None else 1.
-
-        self._shuffle_hyponymy_dataset_on_every_epoch = shuffle_hyponymy_dataset_on_every_epoch
-
-    def training_step(self, data_batch, batch_nb):
+    def training_step(self, batch, batch_idx):
 
         current_step = self.trainer.global_step / (self.trainer.max_nb_epochs * self.trainer.total_batches)
         self._update_model_parameters(current_step, verbose=False)
         self._update_loss_parameters(current_step, verbose=False)
 
-        if isinstance(data_batch, list):
-            data_batch = data_batch[0]
-
         # forward computation
-        t_x = torch.tensor(data_batch["embedding"], dtype=torch.float32, device=self._get_model_device()).squeeze(dim=0)
+        t_codes, t_code_probs = self._model.forward(**batch)
 
-        # DEBUG
-        # return {"loss":torch.tensor(0.0, requires_grad=True), "log":{}}
-
-        t_latent_code, t_code_prob, t_x_dash = self._model.forward(t_x)
-
-        # (required) reconstruction loss
-        loss_reconst = self._loss_reconst(t_x_dash, t_x)
-
-        # hyponymy relation related loss
-        if self._use_intermediate_representation:
-            code_repr = t_latent_code
+        # choose the representation which is used for loss computation
+        if self._use_sampled_code_repr_for_loss_computation:
+            code_repr = t_codes
         else:
-            code_repr = t_code_prob
+            code_repr = t_code_probs
 
-        # (required) hyponymy score loss
-        lst_tup_hyponymy = data_batch["hyponymy_relation"]
-        loss_hyponymy = self._loss_hyponymy(code_repr, lst_tup_hyponymy)
+        # (required) supervised loss
+        loss_supervised = self._loss_supervised.forward(target_codes=batch["ground_truth_synset_codes"], input_code_probabilities=code_repr)
 
-        # (optional) non-hyponymy score loss
-        if self._loss_non_hyponymy is not None:
-            lst_tup_non_hyponymy = data_batch["non_hyponymy_relation"]
-            loss_non_hyponymy = self._loss_non_hyponymy(code_repr, lst_tup_non_hyponymy)
-        else:
-            loss_non_hyponymy = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device)
-
-        # (optional) code length loss
-        if self._loss_code_length is not None:
-            lst_tup_entity_depth = data_batch["entity_depth"]
-            loss_code_length = self._loss_code_length(code_repr, lst_tup_entity_depth)
-        else:
-            loss_code_length = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device)
-
-        # (optional) mutual information loss
-        if self._loss_mutual_info is not None:
-            loss_mutual_info = self._loss_mutual_info(t_code_prob)
-        else:
-            loss_mutual_info = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device)
-
-        loss = loss_reconst + loss_hyponymy + loss_non_hyponymy + loss_code_length + loss_mutual_info
+        loss = loss_supervised
 
         dict_losses = {
-            "train_loss_reconst": loss_reconst / self._scale_loss_reconst,
-            "train_loss_mutual_info": loss_mutual_info / self._scale_loss_mi,
-            "train_loss_hyponymy": loss_hyponymy / self._scale_loss_hyponymy,
-            "train_loss_non_hyponymy": loss_non_hyponymy / self._scale_loss_non_hyponymy,
-            "train_loss_code_length": loss_code_length / self._scale_loss_code_length,
+            "train_loss_supervised": loss_supervised / self._scale_loss_supervised,
             "train_loss": loss
         }
-        return {"loss":loss, "log": dict_losses}
+        self.log_dict(dict_losses)
+        return loss
 
-    def validation_step(self, data_batch, batch_nb):
-
-        if isinstance(data_batch, list):
-            data_batch = data_batch[0]
+    def validation_step(self, batch, batch_idx):
 
         # forward computation without back-propagation
-        t_x = torch.tensor(data_batch["embedding"], dtype=torch.float32, device=self._get_model_device()).squeeze(dim=0)
-        t_latent_code, t_code_prob, t_x_dash = self._model._predict(t_x)
+        t_target_codes = batch["ground_truth_synset_codes"]
+        t_codes, t_code_probs = self._model._predict(**batch)
+        code_repr = t_codes
 
-        # (required) reconstruction loss
-        loss_reconst = self._loss_reconst(t_x_dash, t_x)
+        # (required) supervised loss
+        loss_reconst = self._loss_supervised.forward(target_codes=t_target_codes, input_code_probabilities=code_repr)
 
-        # hyponymy relation related loss
-        if self._use_intermediate_representation:
-            code_repr = t_latent_code
-        else:
-            code_repr = t_code_prob
-
-        # (required) hyponymy score loss
-        lst_tup_hyponymy = data_batch["hyponymy_relation"]
-        loss_hyponymy = self._loss_hyponymy(code_repr, lst_tup_hyponymy)
-
-        # (optional) non-hyponymy score loss
-        if self._loss_non_hyponymy is not None:
-            lst_tup_non_hyponymy = data_batch["non_hyponymy_relation"]
-            loss_non_hyponymy = self._loss_non_hyponymy(code_repr, lst_tup_non_hyponymy)
-            loss_hyponymy_positive = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device)
-        else:
-            cache = self._loss_hyponymy.reduction
-            self._loss_hyponymy.reduction = "none"
-            lst_loss_hyponymy = self._loss_hyponymy(code_repr, lst_tup_hyponymy)
-            self._loss_hyponymy.reduction = cache
-            n_sample = len(lst_tup_hyponymy)
-            loss_non_hyponymy = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device); n_non_hyponymy = 0
-            loss_hyponymy_positive = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device); n_hyponymy_positive = 0
-            for l, (u, v, distance) in zip(lst_loss_hyponymy, lst_tup_hyponymy):
-                if distance <= 0:
-                    loss_non_hyponymy += l
-                    n_non_hyponymy += 1
-                else:
-                    loss_hyponymy_positive += l
-                    n_hyponymy_positive += 1
-            loss_non_hyponymy = loss_non_hyponymy / n_non_hyponymy
-            loss_hyponymy_positive = loss_hyponymy_positive / n_hyponymy_positive
-
-        # (optional) code length loss
-        if self._loss_code_length is not None:
-            lst_tup_entity_depth = data_batch["entity_depth"]
-            loss_code_length = self._loss_code_length(code_repr, lst_tup_entity_depth)
-        else:
-            loss_code_length = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device)
+        # analysis metrics
+        ## lowest common ancestor lengths
+        metric_lca_lengths = self._auxiliary.calc_log_soft_lowest_common_ancestor_length()
 
         # (optional) mutual information loss
         if self._loss_mutual_info is not None:
-            loss_mi = self._loss_mutual_info(t_code_prob)
+            loss_mi = self._loss_mutual_info(t_code_probs)
         else:
-            loss_mi = torch.tensor(0.0, dtype=torch.float32, device=t_code_prob.device)
+            loss_mi = torch.tensor(0.0, dtype=torch.float32, device=t_code_probs.device)
 
         loss = loss_reconst + loss_hyponymy + loss_non_hyponymy + loss_code_length + loss_mi
 
         metrics = {
             "val_loss_reconst": loss_reconst / self._scale_loss_reconst,
             "val_loss_mutual_info": loss_mi / self._scale_loss_mi,
-            "val_loss_hyponymy": loss_hyponymy / self._scale_loss_hyponymy,
+            "val_loss_hyponymy": loss_hyponymy / self._scale_loss_supervised,
             "val_loss_non_hyponymy": loss_non_hyponymy / self._scale_loss_non_hyponymy,
-            "val_loss_hyponymy_positive": loss_hyponymy_positive / self._scale_loss_hyponymy, # self._scale_loss_non_hyponymy,
+            "val_loss_hyponymy_positive": loss_hyponymy_positive / self._scale_loss_supervised, # self._scale_loss_non_hyponymy,
             "val_loss_code_length": loss_code_length / self._scale_loss_code_length,
             "val_loss": loss
         }
-        metrics_repr = self._evaluate_code_stats(t_code_prob)
+        metrics_repr = self._evaluate_code_stats(t_code_probs)
         metrics.update(metrics_repr)
 
         return {"val_loss":loss, "log":metrics}
 
     def on_epoch_start(self):
-        if self._shuffle_hyponymy_dataset_on_every_epoch:
-            self.train_dataloader().dataset.shuffle_hyponymy_dataset()
+        pass
