@@ -6,7 +6,7 @@ import sys, io, os
 DIR_TRAIN_UNSUPERVISED = "/home/sakae/Windows/dataset/word_sense_disambiguation/monosemous_word_annotated_corpus/bert_embeddings/"
 
 cfg_training = {
-    "wikitext103": {
+    "wikitext103-bert-base-cased": {
         "path":os.path.join(DIR_TRAIN_UNSUPERVISED, "bert-base-cased_wikitext103_train_freq=10-100_len=6-128.hdf5"),
         "padding": False,
         "max_sequence_length": None,
