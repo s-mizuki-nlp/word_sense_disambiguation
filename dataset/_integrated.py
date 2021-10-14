@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 import warnings
-from typing import Set, Optional, Dict, Any, Iterator, Union, List
+from typing import Set, Optional, Dict, Any, Iterator, Union, List, Iterable
 
 import torch
+import pydash
 
 from .contextualized_embeddings import BERTEmbeddingsDataset
 from .lexical_knowledge import LemmaDataset, SynsetDataset
@@ -17,12 +18,13 @@ class WSDTaskDataset(IterableDataset):
 
     def __init__(self, is_trainset: bool,
                  bert_embeddings_dataset: BERTEmbeddingsDataset,
-                 lexical_knowledge_lemma_dataset: LemmaDataset,
+                 lexical_knowledge_lemma_dataset: Optional[LemmaDataset] = None,
                  lexical_knowledge_synset_dataset: Optional[SynsetDataset] = None,
                  n_ancestor_hop_of_ground_truth_synset: int = 0,
                  return_level: str = "entity",
                  record_entity_field_name: str = "monosemous_entities",
                  record_entity_span_field_name: str = "subword_spans",
+                 copy_field_names_from_record_to_entity: Optional[Iterable[str]] = None,
                  return_entity_subwords_avg_vector: bool = False,
                  raise_error_on_unknown_lemma: bool = True,
                  excludes: Optional[Set[str]] = None):
@@ -35,8 +37,12 @@ class WSDTaskDataset(IterableDataset):
         self._raise_error_on_unknown_lemma = raise_error_on_unknown_lemma
         self._record_entity_field_name = record_entity_field_name
         self._record_entity_span_field_name = record_entity_span_field_name
+        self._copy_field_names_from_record_to_entity = copy_field_names_from_record_to_entity
         self._return_entity_subwords_avg_vector = return_entity_subwords_avg_vector
         self._excludes = set() if excludes is None else excludes
+
+        if is_trainset:
+            assert lexical_knowledge_lemma_dataset is not None, f"you have to specify `lexical_knowledge_lemma_dataset` to get ground-truth synset code."
 
         assert n_ancestor_hop_of_ground_truth_synset >= 0, f"`n_ancestor_hop_of_ground_truth_synset` must be zero or positive: {n_ancestor_hop_of_ground_truth_synset}"
         self._n_ancestor_hop_of_ground_truth_synset = n_ancestor_hop_of_ground_truth_synset
@@ -51,6 +57,8 @@ class WSDTaskDataset(IterableDataset):
         return lst_entity_spans
 
     def _test_if_unknown_lemma(self, lemma: str, pos: str) -> bool:
+        if self.lemma_dataset is None:
+            return False
         if (lemma, pos) not in self.lemma_dataset:
             msg = f"unknown lemma detected: ({lemma},{pos})"
             if self._raise_error_on_unknown_lemma:
@@ -59,23 +67,32 @@ class WSDTaskDataset(IterableDataset):
                 warnings.warn(msg)
                 return True
 
+    def _copy_fields(self, dict_source: Dict[str, Any], dict_target: Dict[str, Any],
+                     copy_field_names: Optional[Iterable[str]] = None):
+        if copy_field_names is None:
+            return dict_target
+
+        for field_name in copy_field_names:
+            dict_target[field_name] = dict_source[field_name]
+        return dict_target
+
     def _entity_loader(self) -> Iterator[Dict[str, Any]]:
         for obj_sentence in self._sentence_loader():
-            lst_entities = obj_sentence["record"][self._record_entity_field_name]
+            obj_sentence_record = obj_sentence["record"]
+            lst_entities = obj_sentence_record[self._record_entity_field_name]
             lst_entity_embeddings = obj_sentence["entity_embeddings"]
             lst_entity_seq_len = obj_sentence["entity_sequence_lengths"]
             lst_entity_span_avg_vectors = obj_sentence.get("entity_span_avg_vectors", [])
             context_embedding = obj_sentence["embedding"]
             context_sequence_length = obj_sentence["sequence_length"]
 
-            for idx, dict_entity_record in enumerate(lst_entities):
-                lemma, pos = dict_entity_record["lemma"], dict_entity_record["pos"]
+            for idx, dict_entity in enumerate(lst_entities):
+                dict_entity = self._copy_fields(dict_source=obj_sentence_record, dict_target=dict_entity,
+                                                copy_field_names=self._copy_field_names_from_record_to_entity)
+
+                lemma, pos = dict_entity["lemma"], dict_entity["pos"]
                 if self._test_if_unknown_lemma(lemma, pos):
                     continue
-
-                synset_ids = self.lemma_dataset.get_synset_ids(lemma, pos)
-                synset_codes = self.lemma_dataset.get_synset_codes(lemma, pos)
-                lexnames = self.lemma_dataset[(lemma, pos)]["lexnames"]
 
                 obj_entity = {
                     "entity_embedding": lst_entity_embeddings[idx],
@@ -90,6 +107,10 @@ class WSDTaskDataset(IterableDataset):
 
                 # assign ground-truth synset
                 if self._is_trainset: # training dataset
+                    synset_ids = self.lemma_dataset.get_synset_ids(lemma, pos)
+                    synset_codes = self.lemma_dataset.get_synset_codes(lemma, pos)
+                    lexnames = self.lemma_dataset[(lemma, pos)]["lexnames"]
+
                     assert (len(synset_ids) == 1) and (len(synset_codes) == 1), \
                         f"specified entity is sense-ambiguous: {','.join(synset_ids)}"
 
@@ -112,7 +133,7 @@ class WSDTaskDataset(IterableDataset):
                 else: # evaluation dataset -> dataset.evalution.WSDEvaluationDataset
                     pass
 
-                obj_entity.update(dict_entity_record)
+                obj_entity.update(dict_entity)
 
                 yield obj_entity
 
@@ -187,14 +208,20 @@ class WSDTaskDataset(IterableDataset):
     def n_ancestor_hop_of_ground_truth_synset(self):
         return self._n_ancestor_hop_of_ground_truth_synset
 
+    @property
+    def is_trainset(self):
+        return self._is_trainset
+
 
 class WSDTaskDatasetCollateFunction(object):
 
     def __init__(self,
+                 is_trainset: bool,
                  return_records: bool = True,
                  return_entity_context_attn_mask: bool = False,
                  num_heads_entity_context_mha: Optional[int] = None):
 
+        self._is_trainset = is_trainset
         self._return_records = return_records
         self._return_entity_context_attn_mask = return_entity_context_attn_mask
 
@@ -241,9 +268,10 @@ class WSDTaskDatasetCollateFunction(object):
             )
             dict_ret["entity_context_attn_mask"] = entity_context_attn_mask
 
-        # ground truth: synset code
-        dict_ret["ground_truth_synset_codes"] = torch.tensor(_list_of("ground_truth_synset_code"), dtype=torch.long, device=device)
-        dict_ret["ground_truth_synset_ids"] = _list_of("ground_truth_synset_id")
+        if self._is_trainset:
+            # ground truth: synset code
+            dict_ret["ground_truth_synset_codes"] = torch.tensor(_list_of("ground_truth_synset_code"), dtype=torch.long, device=device)
+            dict_ret["ground_truth_synset_ids"] = _list_of("ground_truth_synset_id")
 
         # other attributes are accumulated as `records` object.
         if self._return_records:
