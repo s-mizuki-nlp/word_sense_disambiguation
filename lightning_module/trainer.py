@@ -49,6 +49,9 @@ class UnsupervisedTrainer(pl.LightningModule):
         self.n_ary = model.n_ary
         self.n_digits = model.n_digits
 
+        # ToDo: implement hyper-parameter export feature on encoder when saving hyper-parameters are helpful.
+        self.save_hyperparameters({"n_ary":model.n_ary})
+
         self._learning_rate = learning_rate
         self._dataloaders = {
             "train": dataloader_train,
@@ -98,30 +101,30 @@ class UnsupervisedTrainer(pl.LightningModule):
         t_codes, t_code_probs = self._model.forward(x)
         return t_codes, t_code_probs
 
-    def _evaluate_code_stats(self, t_code_prob):
-
-        _EPS = 1E-6
+    def _evaluate_code_stats(self, t_target_codes: torch.Tensor, t_code_probs_pred: torch.Tensor, eps: float = 1E-7):
+        # one-hot encoding without smoothing
         n_ary = self._model.n_ary
-        soft_code_length = self._auxiliary.calc_soft_code_length(t_code_prob)
-        code_probability_divergence = torch.mean(np.log(n_ary) + torch.sum(t_code_prob * torch.log(t_code_prob + _EPS), axis=-1), axis=-1)
+        t_code_probs_gt = self._auxiliary._one_hot_encoding(t_codes=t_target_codes, n_ary=n_ary, label_smoothing_factor=0.0)
+
+        # code lengths
+        t_code_length_gt = (t_target_codes != 0).sum(axis=-1).type(torch.float)
+        t_soft_code_length_pred = self._auxiliary.calc_soft_code_length(t_code_probs_pred)
+
+        # common prefix lengths
+        t_soft_cpl = self._auxiliary.calc_soft_lowest_common_ancestor_length(t_prob_c_x=t_code_probs_gt, t_prob_c_y=t_code_probs_pred)
+        t_lca_vs_gt_ratio = t_soft_cpl / t_code_length_gt
+        t_pred_vs_gt_ratio = t_soft_code_length_pred / t_code_length_gt
+
+        code_probability_divergence = torch.mean(np.log(n_ary) + torch.sum(t_code_probs_pred * torch.log(t_code_probs_pred + eps), axis=-1), axis=-1)
 
         metrics = {
-            "val_soft_code_length_mean":torch.mean(soft_code_length),
-            "val_soft_code_length_std":torch.std(soft_code_length),
-            "val_code_probability_divergence":torch.mean(code_probability_divergence)
+            "val_soft_code_length_mean":torch.mean(t_soft_code_length_pred),
+            "val_soft_code_length_std":torch.std(t_soft_code_length_pred),
+            "val_code_probability_divergence":torch.mean(code_probability_divergence),
+            "val_soft_lca_vs_gt_ratio":torch.mean(t_lca_vs_gt_ratio),
+            "val_soft_code_length_pred_vs_gt_ratio":torch.mean(t_pred_vs_gt_ratio)
         }
         return metrics
-
-    def validation_end(self, outputs):
-        avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-
-        avg_metrics = defaultdict(list)
-        for output in outputs:
-            for key, value in output["log"].items():
-                avg_metrics[key].append(value)
-        for key, values in avg_metrics.items():
-            avg_metrics[key] = torch.stack(values).mean()
-        return {'avg_val_loss': avg_loss, 'log': avg_metrics}
 
     def on_save_checkpoint(self, checkpoint):
         device = self._get_model_device()
@@ -245,36 +248,33 @@ class UnsupervisedTrainer(pl.LightningModule):
         # forward computation without back-propagation
         t_target_codes = batch["ground_truth_synset_codes"]
         t_codes, t_code_probs = self._model._predict(**batch)
-        code_repr = t_codes
+
+        if self._use_sampled_code_repr_for_loss_computation:
+            code_repr = t_codes
+        else:
+            code_repr = t_code_probs
 
         # (required) supervised loss
-        loss_reconst = self._loss_supervised.forward(target_codes=t_target_codes, input_code_probabilities=code_repr)
+        loss_supervised = self._loss_supervised.forward(target_codes=t_target_codes, input_code_probabilities=code_repr)
 
-        # analysis metrics
-        ## lowest common ancestor lengths
-        metric_lca_lengths = self._auxiliary.calc_log_soft_lowest_common_ancestor_length()
-
-        # (optional) mutual information loss
-        if self._loss_mutual_info is not None:
-            loss_mi = self._loss_mutual_info(t_code_probs)
-        else:
-            loss_mi = torch.tensor(0.0, dtype=torch.float32, device=t_code_probs.device)
-
-        loss = loss_reconst + loss_hyponymy + loss_non_hyponymy + loss_code_length + loss_mi
+        loss = loss_supervised
 
         metrics = {
-            "val_loss_reconst": loss_reconst / self._scale_loss_reconst,
-            "val_loss_mutual_info": loss_mi / self._scale_loss_mi,
-            "val_loss_hyponymy": loss_hyponymy / self._scale_loss_supervised,
-            "val_loss_non_hyponymy": loss_non_hyponymy / self._scale_loss_non_hyponymy,
-            "val_loss_hyponymy_positive": loss_hyponymy_positive / self._scale_loss_supervised, # self._scale_loss_non_hyponymy,
-            "val_loss_code_length": loss_code_length / self._scale_loss_code_length,
             "val_loss": loss
         }
-        metrics_repr = self._evaluate_code_stats(t_code_probs)
+
+        # analysis metrics
+        metrics_repr = self._evaluate_code_stats(target_codes=t_target_codes, input_code_probabilities=t_code_probs)
         metrics.update(metrics_repr)
 
-        return {"val_loss":loss, "log":metrics}
+        self.log_dict(metrics)
+
+        return None
+
+    def test_step(self, batch, batch_idx):
+        # ToDo: call WSD evaluator
+        # self._evaluator
+        pass
 
     def on_epoch_start(self):
         pass
