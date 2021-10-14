@@ -4,18 +4,6 @@
 import sys, io, os
 
 DIR_TRAIN_UNSUPERVISED = "/home/sakae/Windows/dataset/word_sense_disambiguation/monosemous_word_annotated_corpus/bert_embeddings/"
-DIR_TRAIN = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Training_Corpora/bert_embeddings/"
-DIR_EVAL = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Evaluation_Framework/bert_embeddings/"
-
-cfg_evaluation = {
-    "WSDEval-all": {
-        "path":os.path.join(DIR_EVAL, "bert-large-cased_wsdeval-all.hdf5"),
-        "padding": False,
-        "max_sequence_length": None,
-        "filter_function":None,
-        "description": "BERT-large-cased. WSD Evaluation Framework dataset [Raganato+, 2017]"
-    }
-}
 
 cfg_training = {
     "wikitext103": {
@@ -41,11 +29,5 @@ cfg_training = {
         "padding": False,
         "max_sequence_length": None,
         "description": "BERT-large-cased. Wiki40b trainset, freq=10~200, length=6~128."
-    },
-    "SemCor": {
-        "path":os.path.join(DIR_TRAIN, "NOT_YET_AVAILABLE.hdf5"),
-        "padding": False,
-        "max_sequence_length": None,
-        "description": "BERT-large-cased. SemCor corpus."
     }
 }
