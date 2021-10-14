@@ -8,7 +8,7 @@ from nltk.corpus import wordnet as wn
 from bs4 import BeautifulSoup
 
 from dataset.evaluation import WSDEvaluationDataset
-from config_files.wsd_datasets import word_sense_disambiguation
+from config_files.sense_annotated_corpus import word_sense_disambiguation
 
 
 class WSDEvaluationDatasetTestCases(unittest.TestCase):
