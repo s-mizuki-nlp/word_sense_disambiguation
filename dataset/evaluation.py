@@ -157,7 +157,14 @@ class WSDEvaluationDataset(Dataset):
 
     def _record_loader(self):
         if not hasattr(self, "_records"):
-            self._records = [record for record in self._sentence_loader()]
+            self._records = []
+            for record in self._sentence_loader():
+                # transform each field of the entry
+                entry = self._transform(record)
+                # verify the entry is valid or not
+                if self._filter(entry) == True:
+                    continue
+                self._records.append(entry)
 
         return self._records
 
@@ -218,14 +225,7 @@ class WSDEvaluationDataset(Dataset):
         iter_records = self._record_loader()
         n_read = 0
         for record in iter_records:
-            # transform each field of the entry
-            entry = self._transform(record)
-
-            # verify the entry is valid or not
-            if self._filter(entry) == True:
-                continue
-
-            yield entry
+            yield record
 
             n_read += 1
 
