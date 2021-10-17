@@ -98,7 +98,7 @@ class BaseEvaluator(object):
 
         return dict_ret
 
-    def macro_average_recursive(self, dict_lst_dict_metrics: Dict[Union[Dict, List]]) -> Dict[Dict[str, float]]:
+    def macro_average_recursive(self, dict_lst_dict_metrics: Dict[str, Union[Dict, List]]) -> Dict[str, Dict[str, float]]:
         dict_ret = {}
         for key, values in dict_lst_dict_metrics.items():
             if isinstance(values, list):
@@ -177,6 +177,14 @@ class WSDTaskEvaluatorBase(BaseEvaluator, metaclass=ABCMeta):
             ground_truthes = inputs_for_evaluator[self._ground_truth_lemma_keys_field_name]
             dict_metrics = self.compute_metrics(ground_truthes, predictions)
             yield inputs_for_predictor, inputs_for_evaluator, ground_truthes, predictions, dict_metrics
+
+    def __len__(self):
+        if not hasattr(self, "n_sample"):
+            n_sample = 0
+            for _ in self.iter_records():
+                n_sample += 1
+            self.n_sample = n_sample
+        return self.n_sample
 
     def evaluate(self):
         dict_dict_results = defaultdict(lambda : defaultdict(list))
