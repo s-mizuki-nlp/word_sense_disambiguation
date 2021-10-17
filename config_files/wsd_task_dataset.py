@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 
 from dataset import WSDTaskDataset, WSDTaskDatasetCollateFunction
 from dataset.lexical_knowledge import LemmaDataset, SynsetDataset
+from dataset.evaluation import EntityLevelWSDEvaluationDataset
 from dataset.contextualized_embeddings import BERTEmbeddingsDataset
 
 
@@ -73,6 +74,8 @@ def WSDTaskDataLoader(dataset: WSDTaskDataset,
     return data_loader
 
 ### pre-defined datasets ###
+wsd_eval_wo_embeddings = EntityLevelWSDEvaluationDataset(**sense_annotated_corpus.cfg_evaluation["WSDEval-ALL"])
+
 wsd_eval_bert_large_cased = CreateWSDEvaluationTaskDataset(
     cfg_bert_embeddings=sense_annotated_corpus.cfg_evaluation["WSDEval-all-bert-large-cased"],
     **cfg_task_dataset["WSDEval"]
