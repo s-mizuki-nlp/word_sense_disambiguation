@@ -22,7 +22,7 @@ from model import HierarchicalCodeEncoder
 from model.loss_supervised import HyponymyScoreLoss, EntailmentProbabilityLoss, CrossEntropyLossWrapper
 
 
-class UnsupervisedTrainer(pl.LightningModule):
+class SenseCodeTrainer(pl.LightningModule):
 
     def __init__(self,
                  model: HierarchicalCodeEncoder,
