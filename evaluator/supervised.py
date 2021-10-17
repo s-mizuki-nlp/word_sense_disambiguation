@@ -7,50 +7,132 @@ from __future__ import print_function
 
 
 from abc import ABCMeta, abstractmethod
-from typing import Optional, Dict, Callable, Iterable, Any, List, Union
+from typing import Optional, Dict, Callable, Iterable, Any, List, Union, Set
 from collections import defaultdict
-import pydash
+# import pydash
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
-from dataset.word_embeddings import AbstractWordEmbeddingsDataset
+
 from model.core import HierarchicalCodeEncoder
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report, f1_score, roc_auc_score
-from .hyponymy import HyponymyScoreBasedPredictor, EntailmentProbabilityBasedPredictor
+from .predictor import HyponymyScoreBasedPredictor, EntailmentProbabilityBasedPredictor
 from scipy.stats import spearmanr, kendalltau
 
-class BaseEvaluator(object, metaclass=ABCMeta):
+from model.loss_supervised import HyponymyScoreLoss
 
-    def __init__(self, model: HierarchicalCodeEncoder,
-                 hyponymy_predictor_type: str = "hyponymy_score",
-                 embeddings_dataset: Optional[AbstractWordEmbeddingsDataset] = None,
-                 evaluation_dataset: Optional[Dataset] = None,
+from config_files.wsd_task_dataset import WSDTaskDataLoader
+from dataset import WSDTaskDataset
+from dataset.lexical_knowledge import SynsetDataset
+from dataset.evaluation import EntityLevelWSDEvaluationDataset
+
+
+class BaseEvaluator(object):
+
+    def _iter_to_set(self, inputs: Union[str, Iterable[str]]):
+        if isinstance(inputs, str):
+            return {inputs,}
+        else:
+            return set(inputs)
+
+    def precision(self, ground_truthes: Iterable[str], predictions: Iterable[str]):
+        numerator = self._iter_to_set(predictions).intersection(self._iter_to_set(ground_truthes))
+        denominator = self._iter_to_set(predictions)
+
+        if len(denominator) == 0:
+            return 0.0
+        else:
+            return len(numerator) / len(denominator)
+
+    def recall(self, ground_truthes: Iterable[str], predictions: Iterable[str]):
+        numerator = self._iter_to_set(predictions).intersection(self._iter_to_set(ground_truthes))
+        denominator = self._iter_to_set(ground_truthes)
+
+        if len(denominator) == 0:
+            return 0.0
+        else:
+            return len(numerator) / len(denominator)
+
+    def f1_score(self, ground_truthes: Iterable[str], predictions: Iterable[str]):
+        prec = self.precision(ground_truthes, predictions)
+        recall = self.recall(ground_truthes, predictions)
+
+        if prec == recall == 0.0:
+            return 0.0
+        else:
+            return 2*prec*recall/(prec+recall)
+
+    def accuracy(self, ground_truthes: Iterable[str], predictions: Iterable[str]):
+        """
+        it returns the exact-match accuracy; known as subset accuracy in literature.
+        this behaviour is equivalent to sklearn.metrics.accuracy_score() function in multilabel classification.
+        ref: https://scikit-learn.org/stable/modules/generated/sklearn.metrics.accuracy_score.html#sklearn.metrics.accuracy_score
+
+        @param ground_truthes: iterable of strings.
+        @param predictions: iterable of strings.
+        """
+        gt = self._iter_to_set(ground_truthes)
+        pred = self._iter_to_set(predictions)
+        if gt == pred:
+            return 1.0
+        else:
+            return 0.0
+
+    def compute_metrics(self, ground_truthes: Iterable[str], predictions: Iterable[str]):
+        dict_ret = {
+            "precision": self.precision(ground_truthes, predictions),
+            "recall": self.recall(ground_truthes, predictions),
+            "f1_score": self.f1_score(ground_truthes, predictions),
+            "accuracy": self.accuracy(ground_truthes, predictions)
+        }
+        return dict_ret
+
+    def macro_average(self, lst_dict_metrics: List[Dict[str, float]]) -> Dict[str, float]:
+        dict_lst_metrics = defaultdict(list)
+
+        for dict_metrics in lst_dict_metrics:
+            for metric, value in dict_metrics.items():
+                dict_lst_metrics[metric].append(value)
+
+        dict_ret = {metric:np.mean(lst_values) for metric, lst_values in dict_lst_metrics.items()}
+
+        return dict_ret
+
+    def macro_average_recursive(self, dict_lst_dict_metrics: Dict[Union[Dict, List]]) -> Dict[Dict[str, float]]:
+        dict_ret = {}
+        for key, values in dict_lst_dict_metrics.items():
+            if isinstance(values, list):
+                dict_ret[key] = self.macro_average(values)
+            elif isinstance(values, Dict):
+                dict_ret[key] = self.macro_average_recursive(values)
+        return dict_ret
+
+
+class WSDTaskEvaluatorBase(BaseEvaluator, metaclass=ABCMeta):
+
+    def __init__(self,
+                 evaluation_dataset: Union[EntityLevelWSDEvaluationDataset, WSDTaskDataset],
+                 ground_truth_lemma_keys_field_name: str = "ground_truth_lemma_keys",
+                 breakdown_attributes: Optional[Iterable[Set[str]]] = None,
                  **kwargs_dataloader):
 
-        self._model = model
-        if embeddings_dataset is not None:
-            self._embeddings_dataset = embeddings_dataset
-            self._embeddings_data_loader = DataLoader(embeddings_dataset, **kwargs_dataloader)
-        if evaluation_dataset is not None:
-            self._evaluation_dataset = evaluation_dataset
-            self._evaluation_data_loader = DataLoader(evaluation_dataset, **kwargs_dataloader)
+        self._ground_truth_lemma_keys_field_name = ground_truth_lemma_keys_field_name
 
-        if hyponymy_predictor_type == "hyponymy_score":
-            self._hyponymy_predictor_class = HyponymyScoreBasedPredictor
-        elif hyponymy_predictor_type == "entailment_probability":
-            self._hyponymy_predictor_class = EntailmentProbabilityBasedPredictor
+        # create evalset dataloader
+        self._evaluation_dataset = evaluation_dataset
+        if isinstance(evaluation_dataset, WSDTaskDataset):
+            self._evaluation_data_loader = WSDTaskDataLoader(evaluation_dataset, batch_size=1)
+        elif isinstance(evaluation_dataset, EntityLevelWSDEvaluationDataset):
+            self._evaluation_data_loader = DataLoader(evaluation_dataset, batch_size=1, collate_fn=lambda v:v, **kwargs_dataloader)
         else:
-            valid_hyponymy_predictor_type = ("hyponymy_score", "entailment_probability")
-            raise ValueError(f"`hyponymy_predictor_type` must be: {','.join(valid_hyponymy_predictor_type)}")
+            raise ValueError(f"unknown dataset: {type(evaluation_dataset)}")
 
-        self._default_evaluator = {
-            "accuracy": lambda y_true, y_pred, **kwargs: accuracy_score(y_true, y_pred),
-            "confusion_matrix": lambda y_true, y_pred, **kwargs: confusion_matrix(y_true, y_pred, **kwargs),
-            "classification_report": lambda y_true, y_pred, **kwargs: classification_report(y_true, y_pred, **kwargs),
-            "macro_f_value": lambda y_true, y_pred, **kwargs: f1_score(y_true, y_pred, average="macro", **kwargs),
-        }
 
-        self._update_task_specific_evaluator()
+        # if breakdown is not set, apply default dataset
+        if breakdown_attributes is None:
+            self._breakdown_attributes = [{"corpus_id",}, {"pos_orig",}, {"corpus_id", "pos_orig"}]
+        else:
+            self._breakdown_attributes = breakdown_attributes
 
     def _tensor_to_list(self, tensor_or_list: Union[torch.Tensor, List]):
         if isinstance(tensor_or_list, torch.Tensor):
@@ -58,170 +140,92 @@ class BaseEvaluator(object, metaclass=ABCMeta):
         else:
             return tensor_or_list
 
-    def _inference(self, dict_inference_functions: Dict[str, Callable[[np.array, np.array], Any]],
-                   hyponym_field_name: str, hypernym_field_name: str, embedding_field_name: str):
+    @abstractmethod
+    def predict(self, input: Dict[str, Any]) -> Iterable[str]:
+        pass
 
-        dict_lst_inference = defaultdict(list)
-        for batch in self._evaluation_data_loader:
-            # take hyponyms, hypernyms
-            lst_hyponyms = batch[hyponym_field_name]
-            lst_hypernyms = batch[hypernym_field_name]
-            # take embeddings
-            mat_emb_hyponyms = np.stack([self._embeddings_dataset[entity][embedding_field_name] for entity in lst_hyponyms])
-            mat_emb_hypernyms = np.stack([self._embeddings_dataset[entity][embedding_field_name] for entity in lst_hypernyms])
-            # encode embeddings into the code probabilities
-            _, t_mat_code_prob_hyponyms, _ = self._model.predict(mat_emb_hyponyms)
-            _, t_mat_code_prob_hypernyms, _ = self._model.predict(mat_emb_hypernyms)
-
-            # apply predictor functions
-            # x: hypernym, y: hyponym
-            for mat_hyper, mat_hypo in zip(t_mat_code_prob_hypernyms, t_mat_code_prob_hyponyms):
-                for inference_name, inference_function in dict_inference_functions.items():
-                    ret = inference_function(mat_hyper, mat_hypo)
-                    dict_lst_inference[inference_name].append(ret)
-
-        return dict_lst_inference
-
-    def _get_specific_field_values(self, target_field_name):
+    def predict_batch(self, batch) -> List[Iterable[str]]:
         lst_ret = []
-        for batch in self._evaluation_data_loader:
-            obj = batch[target_field_name]
-            if torch.is_tensor(obj) or isinstance(obj, list):
-                lst_ret.extend(self._tensor_to_list(obj))
-            else:
-                lst_ret.append(obj)
+        for record in batch:
+            lst_ret.append(self.predict(record))
         return lst_ret
 
-    @abstractmethod
-    def _update_task_specific_evaluator(self):
-        pass
+    def _get_attr_key_and_values(self, set_attr_names: Set[str], example: Dict[str, str], concat="|"):
+        attr_keys = concat.join([attr_name for attr_name in set_attr_names])
+        attr_values = concat.join([example[attr_name] for attr_name in set_attr_names])
+        return attr_keys, attr_values
 
-    @abstractmethod
+    def iter_records(self):
+        is_wsd_task_dataset = isinstance(self._evaluation_dataset, WSDTaskDataset)
+
+        for single_example_batch in self._evaluation_data_loader:
+            if is_wsd_task_dataset:
+                inputs_for_predictor = single_example_batch
+                inputs_for_evaluator = single_example_batch["records"][0]
+            else:
+                inputs_for_predictor = single_example_batch[0]
+                inputs_for_evaluator = single_example_batch[0]
+            yield inputs_for_predictor, inputs_for_evaluator
+
+    def __iter__(self):
+        """
+        iterate over examples in the evaluation dataset.
+
+        """
+        for inputs_for_predictor, inputs_for_evaluator in self.iter_records():
+            predictions = self.predict(inputs_for_predictor)
+            ground_truthes = inputs_for_evaluator[self._ground_truth_lemma_keys_field_name]
+            dict_metrics = self.compute_metrics(ground_truthes, predictions)
+            yield inputs_for_predictor, inputs_for_evaluator, ground_truthes, predictions, dict_metrics
+
     def evaluate(self):
+        dict_dict_results = defaultdict(lambda : defaultdict(list))
+        dict_dict_results["ALL"] = []
+
+        for _, inputs_for_evaluator, ground_truthes, predicitons, dict_metrics in self:
+            # store metrics
+            dict_dict_results["ALL"].append(dict_metrics)
+            # breakdown by attributes
+            for set_attr_names in self._breakdown_attributes:
+                # e.g. grouper_attr = "corpus_id", breakdown_value = "semeval2"
+                grouper_attr, breakdown_value = self._get_attr_key_and_values(set_attr_names, inputs_for_evaluator)
+                dict_dict_results[grouper_attr][breakdown_value].append(dict_metrics)
+
+        # compute macro average of all breakdowns and metrics.
+        dict_summary = self.macro_average_recursive(dict_dict_results)
+
+        return dict_summary
+
+
+class WiCTaskEvaluatorBase(BaseEvaluator):
+    """
+    Evaluator for Word-in-Context task [Pilehvar and Camacho-Collados, NAACL2019]. This will be used for analysis.
+    """
+
+
+class SenseCodingTaskEvaluatorBase(BaseEvaluator):
+
+    """
+    Evaluator for synset code prediction task. This will be used for future work.
+    """
+
+    def __init__(self, lexical_knowledge_synset_dataset: SynsetDataset):
+        self._auxiliary = HyponymyScoreLoss()
+
+    def _soft_lowest_common_ancestor_length_ratio(self, t_target_codes: torch.Tensor, t_code_probs_pred: torch.Tensor):
+        # one-hot encoding without smoothing
+        n_ary = t_code_probs_pred.shape[-1]
+        t_code_probs_gt = self._auxiliary._one_hot_encoding(t_codes=t_target_codes, n_ary=n_ary, label_smoothing_factor=0.0)
+
+        # code lengths
+        t_code_length_gt = (t_target_codes != 0).sum(axis=-1).type(torch.float)
+
+        # common prefix lengths
+        t_soft_cpl = self._auxiliary.calc_soft_lowest_common_ancestor_length(t_prob_c_x=t_code_probs_gt, t_prob_c_y=t_code_probs_pred)
+        t_lca_vs_gt_ratio = t_soft_cpl / t_code_length_gt
+
+        return t_lca_vs_gt_ratio
+
+    def compute_metrics(self, t_target_codes: torch.Tensor, t_code_probs_pred: torch.Tensor):
+        # ToDo: implement it later
         pass
-
-
-class CodeLengthEvaluator(BaseEvaluator):
-
-    """
-    evaluator for code length prediction task
-    """
-
-    def _update_task_specific_evaluator(self):
-        self._default_evaluator["scaled_mean_absolute_error"] = self._scaled_mean_absolute_error
-
-    def _scaled_mean_absolute_error(self, y_true, y_pred, **kwargs):
-        return np.mean(np.abs(y_pred/self._model.n_digits - y_true/np.max(y_true)))
-
-    def evaluate(self, embedding_key_name: str = "embedding",
-                    ground_truth_key_path: str = "entity_info.code_length",
-                    evaluator: Optional[Dict[str, Callable[[Iterable, Iterable],Any]]] = None,
-                    **kwargs_for_metric_function):
-
-        evaluator = self._default_evaluator if evaluator is None else evaluator
-
-        lst_code_length = []
-        lst_code_length_gt = []
-        for batch in self._embeddings_data_loader:
-            t_x = pydash.objects.get(batch, embedding_key_name)
-            t_code_length_gt = pydash.objects.get(batch, ground_truth_key_path)
-
-            t_code = self._model._encode(t_x)
-
-            v_code_length = np.count_nonzero(t_code, axis=-1)
-            v_code_length_gt = t_code_length_gt.data.numpy()
-
-            lst_code_length.append(v_code_length)
-            lst_code_length_gt.append(v_code_length_gt)
-
-        v_code_length = np.concatenate(lst_code_length)
-        v_code_length_gt = np.concatenate(lst_code_length_gt)
-
-        dict_ret = {}
-
-        for metric_name, f_metric in evaluator.items():
-            try:
-                dict_ret[metric_name] = f_metric(v_code_length_gt, v_code_length, **kwargs_for_metric_function)
-            except:
-                dict_ret[metric_name] = None
-
-        return v_code_length_gt, v_code_length, dict_ret
-
-
-class WSDEvaluator(BaseEvaluator):
-
-    """
-    evaluator for all-words word sense disambiguation task
-    """
-
-    def _update_task_specific_evaluator(self):
-        self._default_evaluator["accuracy_by_category"] = self._accuracy_by_category
-        self._default_evaluator["area_under_curve"] = self._area_under_curve
-        self._default_evaluator["optimal_threshold"] = self._optimal_threshold
-
-    def _accuracy_by_category(self, lst_gt, lst_pred, lst_category, **kwargs):
-        dict_denom = defaultdict(int)
-        dict_num = defaultdict(int)
-        for gt, pred, category in zip(lst_gt, lst_pred, lst_category):
-            dict_denom[category] += 1
-            if gt == pred:
-                dict_num[category] += 1
-        dict_acc = {}
-        for category in dict_denom.keys():
-            dict_acc[category] = dict_num[category] / dict_denom[category]
-
-        return dict_acc
-
-    def _area_under_curve(self, lst_gt, lst_score, **kwargs):
-        ret = roc_auc_score(lst_gt, lst_score)
-        return ret
-
-    def _optimal_threshold(self, lst_gt, lst_score, **kwargs):
-        predictor = self._hyponymy_predictor_class()
-        ret = predictor.calc_optimal_threshold_accuracy(y_true=lst_gt, probas_pred=lst_score, verbose=True)
-        return ret
-
-    def evaluate(self, hyponym_field_name: str = "hyponym",
-                 hypernym_field_name: str = "hypernym",
-                 class_label_field_name: str = "class",
-                 embedding_field_name: str = "embedding",
-                 category_field_name: str = "relation",
-                 threshold_soft_hyponymy_score: float = 0.0,
-                 evaluator: Optional[Dict[str, Callable[[Iterable, Iterable],Any]]] = None,
-                 **kwargs_for_metric_function):
-
-        evaluator = self._default_evaluator if evaluator is None else evaluator
-        predictor = self._hyponymy_predictor_class(threshold=threshold_soft_hyponymy_score)
-
-        # do prediction
-        dict_inference_functions = {
-            "predicted_class": lambda mat_hyper, mat_hypo: predictor.predict_hyponymy_relation(mat_code_prob_x=mat_hyper, mat_code_prob_y=mat_hypo),
-            "predicted_score": lambda mat_hyper, mat_hypo: max(
-                predictor.infer_score(mat_code_prob_x=mat_hyper, mat_code_prob_y=mat_hypo),
-                predictor.infer_score(mat_code_prob_x=mat_hypo, mat_code_prob_y=mat_hyper)
-                )
-        }
-        dict_inference = self._inference(dict_inference_functions,
-                                         hypernym_field_name=hypernym_field_name, hyponym_field_name=hyponym_field_name,
-                                         embedding_field_name=embedding_field_name)
-        lst_pred = dict_inference["predicted_class"]
-        lst_score = dict_inference["predicted_score"]
-
-        lst_gt = self._get_specific_field_values(target_field_name=class_label_field_name)
-        lst_gt_binary = [gt in ("hyponymy", "reverse-hyponymy") for gt in lst_gt]
-        lst_category = self._get_specific_field_values(target_field_name=category_field_name)
-
-        # calculate metrics
-        dict_ret = {}
-        for metric_name, f_metric in evaluator.items():
-            try:
-                if metric_name == "accuracy_by_category":
-                    dict_ret[metric_name] = f_metric(lst_gt, lst_pred, lst_category, **kwargs_for_metric_function)
-                elif metric_name in ("area_under_curve", "optimal_threshold"):
-                    dict_ret[metric_name] = f_metric(lst_gt_binary, lst_score)
-                else:
-                    dict_ret[metric_name] = f_metric(lst_gt, lst_pred, **kwargs_for_metric_function)
-            except:
-                dict_ret[metric_name] = None
-
-        return lst_gt, lst_pred, dict_ret

@@ -10,14 +10,14 @@ import numpy as np
 import pydash
 from tests_inner.utils import calc_hyponymy_score
 from dataset.taxonomy import WordNetTaxonomy
-from .hyponymy import HyponymyScoreBasedPredictor
-from .supervised import BaseEvaluator
+from .predictor import HyponymyScoreBasedPredictor
+from .supervised import WSDTaskEvaluatorBase
 from dataset.word_embeddings import AbstractWordEmbeddingsDataset
 from model.core import HierarchicalCodeEncoder
 from torch.utils.data import DataLoader, Dataset
 
 
-class HyponymyScoreDistributionEvaluator(BaseEvaluator):
+class HyponymyScoreDistributionEvaluator(WSDTaskEvaluatorBase):
 
     """
     computes hyponymy scores of forward and backward direction.
@@ -27,12 +27,12 @@ class HyponymyScoreDistributionEvaluator(BaseEvaluator):
     def _update_task_specific_evaluator(self):
         pass
 
-    def evaluate(self, hyponym_field_name: str = "hyponym",
-                 hypernym_field_name: str = "hypernym",
-                 embedding_field_name: str = "embedding",
-                 category_field_name: str = "relation",
-                 ground_truth: bool = False,
-                 normalize: bool = True):
+    def compute_metrics(self, hyponym_field_name: str = "hyponym",
+                        hypernym_field_name: str = "hypernym",
+                        embedding_field_name: str = "embedding",
+                        category_field_name: str = "relation",
+                        ground_truth: bool = False,
+                        normalize: bool = True):
 
         predictor = HyponymyScoreBasedPredictor()
         n_digits = self._model.n_digits
@@ -66,7 +66,7 @@ class HyponymyScoreDistributionEvaluator(BaseEvaluator):
         return lst_s_ij, lst_s_ji, lst_category
 
 
-class HyponymyScoreDiffEvaluator(BaseEvaluator):
+class HyponymyScoreDiffEvaluator(WSDTaskEvaluatorBase):
 
     """
     computes difference between predicted hyponymy score and ground-truth hyponymy score.
@@ -76,12 +76,12 @@ class HyponymyScoreDiffEvaluator(BaseEvaluator):
     def _update_task_specific_evaluator(self):
         pass
 
-    def evaluate(self, hyponym_field_name: str = "hyponym",
-                 hypernym_field_name: str = "hypernym",
-                 embedding_field_name: str = "embedding",
-                 category_field_name: str = "relation",
-                 code_representation_key_path: Optional[str] = "entity_info.code_representation",
-                 normalize: bool = True):
+    def compute_metrics(self, hyponym_field_name: str = "hyponym",
+                        hypernym_field_name: str = "hypernym",
+                        embedding_field_name: str = "embedding",
+                        category_field_name: str = "relation",
+                        code_representation_key_path: Optional[str] = "entity_info.code_representation",
+                        normalize: bool = True):
 
         predictor = HyponymyScoreBasedPredictor()
         n_digits = self._model.n_digits
@@ -127,7 +127,7 @@ class HyponymyScoreDiffEvaluator(BaseEvaluator):
 
 
 
-class WordNetHyponymyScoreDiffEvaluator(BaseEvaluator):
+class WordNetHyponymyScoreDiffEvaluator(WSDTaskEvaluatorBase):
 
     """
     computes difference between predicted hyponymy score and hyponymy score induced from the trainset taxonomy.
@@ -147,12 +147,12 @@ class WordNetHyponymyScoreDiffEvaluator(BaseEvaluator):
     def _update_task_specific_evaluator(self):
         pass
 
-    def evaluate(self, hyponym_field_name: str = "hyponym",
-                 hypernym_field_name: str = "hypernym",
-                 embedding_field_name: str = "embedding",
-                 category_field_name: str = "relation",
-                 remove_null_score: bool = True,
-                 normalize: bool = True):
+    def compute_metrics(self, hyponym_field_name: str = "hyponym",
+                        hypernym_field_name: str = "hypernym",
+                        embedding_field_name: str = "embedding",
+                        category_field_name: str = "relation",
+                        remove_null_score: bool = True,
+                        normalize: bool = True):
 
         predictor = HyponymyScoreBasedPredictor()
         n_digits = self._model.n_digits
