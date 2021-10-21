@@ -249,9 +249,6 @@ class EntityLevelWSDEvaluationDataset(WSDEvaluationDataset):
             for entity in sentence["entities"]:
                 for field_name in lst_copy_field_names:
                     entity[field_name] = sentence[field_name]
-
-
-
                 yield entity
 
     def _record_loader(self):

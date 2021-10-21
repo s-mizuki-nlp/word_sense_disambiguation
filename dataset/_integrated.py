@@ -24,6 +24,7 @@ class WSDTaskDataset(IterableDataset):
                  return_level: str = "entity",
                  record_entity_field_name: str = "monosemous_entities",
                  record_entity_span_field_name: str = "subword_spans",
+                 ground_truth_lemma_keys_field_name: Optional[str] = None,
                  copy_field_names_from_record_to_entity: Optional[Iterable[str]] = None,
                  return_entity_subwords_avg_vector: bool = False,
                  raise_error_on_unknown_lemma: bool = True,
@@ -37,6 +38,7 @@ class WSDTaskDataset(IterableDataset):
         self._raise_error_on_unknown_lemma = raise_error_on_unknown_lemma
         self._record_entity_field_name = record_entity_field_name
         self._record_entity_span_field_name = record_entity_span_field_name
+        self._ground_truth_lemma_keys_field_name = ground_truth_lemma_keys_field_name
         self._copy_field_names_from_record_to_entity = copy_field_names_from_record_to_entity
         self._return_entity_subwords_avg_vector = return_entity_subwords_avg_vector
         self._excludes = set() if excludes is None else excludes
@@ -107,12 +109,18 @@ class WSDTaskDataset(IterableDataset):
 
                 # assign ground-truth synset
                 if self._is_trainset: # training dataset
-                    synset_ids = self.lemma_dataset.get_synset_ids(lemma, pos)
-                    synset_codes = self.lemma_dataset.get_synset_codes(lemma, pos)
-                    lexnames = self.lemma_dataset[(lemma, pos)]["lexnames"]
+                    if self._ground_truth_lemma_keys_field_name is not None:
+                        lemma_keys = dict_entity[self._ground_truth_lemma_keys_field_name]
+                        synset_ids = self.lemma_dataset.get_synset_ids_from_lemma_keys(lemma_keys)
+                        synset_codes = list(map(self.synset_dataset.get_synset_code, synset_ids))
+                        lexnames = self.lemma_dataset.get_lexnames_from_lemma_keys(lemma_keys)
+                    else:
+                        synset_ids = self.lemma_dataset.get_synset_ids(lemma, pos)
+                        synset_codes = self.lemma_dataset.get_synset_codes(lemma, pos)
+                        lexnames = self.lemma_dataset[(lemma, pos)]["lexnames"]
 
-                    assert (len(synset_ids) == 1) and (len(synset_codes) == 1), \
-                        f"specified entity is sense-ambiguous: {','.join(synset_ids)}"
+                        assert (len(synset_ids) == 1) and (len(synset_codes) == 1), \
+                            f"specified entity is sense-ambiguous: {','.join(synset_ids)}"
 
                     # (optional) assign ancestor synset as the ground-truth.
                     if self._n_ancestor_hop_of_ground_truth_synset == 0:

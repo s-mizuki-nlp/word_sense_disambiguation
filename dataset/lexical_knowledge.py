@@ -53,6 +53,26 @@ class LemmaDataset(NDJSONDataset, Dataset):
         key = lemma_pos_to_tuple(lemma_pos[0], lemma_pos[1], self._lemma_lowercase)
         return key in self._lexical_knowledge
 
+    def get_synset_id_from_lemma_key(self, lemma_key: str):
+        synset_id = wn.lemma_from_key(lemma_key).synset().name()
+        return synset_id
+
+    def get_lexname_from_lemma_key(self, lemma_key: str):
+        lexname = wn.lemma_from_key(lemma_key).synset().lexname()
+        return lexname
+
+    def get_synset_ids_from_lemma_keys(self, lemma_keys: Union[str, Iterable[str]]) -> List[str]:
+        if isinstance(lemma_keys, str):
+            lemma_keys = [lemma_keys]
+        lst_ret = list(map(self.get_synset_id_from_lemma_key, lemma_keys))
+        return lst_ret
+
+    def get_lexnames_from_lemma_keys(self, lemma_keys: Union[str, Iterable[str]]) -> List[str]:
+        if isinstance(lemma_keys, str):
+            lemma_keys = [lemma_keys]
+        lst_ret = list(map(self.get_lexname_from_lemma_key, lemma_keys))
+        return lst_ret
+
     def get_synset_codes(self, lemma: str, pos: str):
         record = self[(lemma, pos)]
         return record["synset_codes"]
