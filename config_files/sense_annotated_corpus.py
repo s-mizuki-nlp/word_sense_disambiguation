@@ -6,8 +6,9 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-from dataset.filter import EmptyFilter
+from dataset.filter import EmptyFilter, DictionaryFilter
 _no_entity_sentence_filter = EmptyFilter(check_field_names=["entities"])
+_noun_verb_entity_selector = DictionaryFilter(includes={"pos":{"n","v"}})
 
 DIR_EVALSET = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Evaluation_Framework/Evaluation_Datasets/"
 DIR_EVALSET_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Evaluation_Framework/bert_embeddings/"
@@ -22,7 +23,7 @@ cfg_evaluation = {
         "lookup_candidate_senses": True,
         "description": "WSD Evaluation Framework dataset [Raganato+, 2017]: ALL",
     },
-    "WSDEval-all-bert-large-cased": {
+    "WSDEval-ALL-bert-large-cased": {
         "path":os.path.join(DIR_EVALSET_EMBEDDINGS, "bert-large-cased_wsdeval-all.hdf5"),
         "padding": False,
         "max_sequence_length": None,

@@ -23,6 +23,16 @@ cfg_task_dataset = {
         "return_entity_subwords_avg_vector":True,
         "raise_error_on_unknown_lemma":False
     },
+    "WSDValidation": {
+        "is_trainset": True,
+        "return_level":"entity",
+        "record_entity_field_name":"entities",
+        "record_entity_span_field_name":"subword_spans",
+        "ground_truth_lemma_keys_field_name":"ground_truth_lemma_keys",
+        "copy_field_names_from_record_to_entity":["corpus_id","document_id","sentence_id","words"],
+        "return_entity_subwords_avg_vector":True,
+        "raise_error_on_unknown_lemma":False
+    },
     "TrainOnMonosemousCorpus": {
         "is_trainset": True,
         "return_level":"entity",
@@ -68,7 +78,9 @@ def WSDTaskDataLoader(dataset: WSDTaskDataset,
                       batch_size: int,
                       cfg_collate_function: Dict[str, Any] = {},
                       **kwargs):
-    collate_fn = WSDTaskDatasetCollateFunction(is_trainset=dataset.is_trainset, **cfg_collate_function)
+    if "is_trainset" not in cfg_collate_function:
+        cfg_collate_function["is_trainset"] = dataset.is_trainset
+    collate_fn = WSDTaskDatasetCollateFunction(**cfg_collate_function)
     data_loader = DataLoader(dataset=dataset, batch_size=batch_size, collate_fn=collate_fn, **kwargs)
 
     return data_loader
@@ -77,7 +89,7 @@ def WSDTaskDataLoader(dataset: WSDTaskDataset,
 wsd_eval_wo_embeddings = EntityLevelWSDEvaluationDataset(**sense_annotated_corpus.cfg_evaluation["WSDEval-ALL"])
 
 wsd_eval_bert_large_cased = CreateWSDEvaluationTaskDataset(
-    cfg_bert_embeddings=sense_annotated_corpus.cfg_evaluation["WSDEval-all-bert-large-cased"],
+    cfg_bert_embeddings=sense_annotated_corpus.cfg_evaluation["WSDEval-ALL-bert-large-cased"],
     **cfg_task_dataset["WSDEval"]
 )
 
@@ -86,4 +98,12 @@ wsd_train_wikitext103_bert_base_cased = CreateWSDTrainingTaskDataset(
     cfg_lemmas=lexical_knowledge_datasets.cfg_lemma_datasets["WordNet-noun-verb-incl-instance"],
     cfg_synsets=lexical_knowledge_datasets.cfg_synset_datasets["WordNet-noun-verb-incl-instance"],
     **cfg_task_dataset["TrainOnMonosemousCorpus"]
+)
+
+# synset code learningの評価用
+wsd_validate_bert_large_cased = CreateWSDTrainingTaskDataset(
+    cfg_bert_embeddings=sense_annotated_corpus.cfg_evaluation["WSDEval-ALL-bert-large-cased"],
+    cfg_lemmas=lexical_knowledge_datasets.cfg_lemma_datasets["WordNet-noun-verb-incl-instance"],
+    cfg_synsets=lexical_knowledge_datasets.cfg_synset_datasets["WordNet-noun-verb-incl-instance"],
+    **cfg_task_dataset["WSDValidation"]
 )
