@@ -36,6 +36,13 @@ cfg_evaluation = {
         "max_sequence_length": None,
         "filter_function":None,
         "description": "WSD Evaluation Framework dataset [Raganato+, 2017] encoded by BERT-large-cased."
+    },
+    "WSDEval-noun-verb-bert-large-cased": {
+        "path":os.path.join(DIR_EVALSET_EMBEDDINGS, "bert-large-cased_WSDEval-noun-verb.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "filter_function":None,
+        "description": "WSD Evaluation Framework dataset [Raganato+, 2017]: Noun and verb entity only, encoded by BERT-large-cased."
     }
 }
 

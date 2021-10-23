@@ -31,7 +31,7 @@ cfg_task_dataset = {
         "ground_truth_lemma_keys_field_name":"ground_truth_lemma_keys",
         "copy_field_names_from_record_to_entity":["corpus_id","document_id","sentence_id","words"],
         "return_entity_subwords_avg_vector":True,
-        "raise_error_on_unknown_lemma":False
+        "raise_error_on_unknown_lemma":True
     },
     "TrainOnMonosemousCorpus": {
         "is_trainset": True,
@@ -93,16 +93,16 @@ wsd_eval_bert_large_cased = CreateWSDEvaluationTaskDataset(
     **cfg_task_dataset["WSDEval"]
 )
 
-wsd_train_wikitext103_bert_base_cased = CreateWSDTrainingTaskDataset(
-    cfg_bert_embeddings=monosemous_corpus.cfg_training["wikitext103-bert-base-cased"],
+wsd_train_wikitext103_subset = CreateWSDTrainingTaskDataset(
+    cfg_bert_embeddings=monosemous_corpus.cfg_training["wikitext103-subset"],
     cfg_lemmas=lexical_knowledge_datasets.cfg_lemma_datasets["WordNet-noun-verb-incl-instance"],
     cfg_synsets=lexical_knowledge_datasets.cfg_synset_datasets["WordNet-noun-verb-incl-instance"],
     **cfg_task_dataset["TrainOnMonosemousCorpus"]
 )
 
-# synset code learningの評価用
+# synset code learningの評価用．WSDEval-noun-verbを使う．
 wsd_validate_bert_large_cased = CreateWSDTrainingTaskDataset(
-    cfg_bert_embeddings=sense_annotated_corpus.cfg_evaluation["WSDEval-ALL-bert-large-cased"],
+    cfg_bert_embeddings=sense_annotated_corpus.cfg_evaluation["WSDEval-noun-verb-bert-large-cased"],
     cfg_lemmas=lexical_knowledge_datasets.cfg_lemma_datasets["WordNet-noun-verb-incl-instance"],
     cfg_synsets=lexical_knowledge_datasets.cfg_synset_datasets["WordNet-noun-verb-incl-instance"],
     **cfg_task_dataset["WSDValidation"]
