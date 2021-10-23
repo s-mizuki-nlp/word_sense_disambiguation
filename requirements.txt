@@ -14,3 +14,4 @@ stanza
 torchtext
 datasets
 ipywidgets
+tensorboard
