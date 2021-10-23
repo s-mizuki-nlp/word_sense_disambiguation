@@ -68,6 +68,13 @@ class GumbelSoftmax(nn.Module):
     def temperature(self, value):
         self._temperature = value
 
+    def summary(self):
+        ret = {
+            "class_name": self.__class__.__name__,
+            "temperature": self.temperature
+        }
+        return ret
+
 
 class Entmax15Estimator(nn.Module):
 

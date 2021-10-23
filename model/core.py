@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple
 import warnings
 
 import numpy
+import pandas as pd
 import numpy as np
 import torch
 from torch import nn
@@ -72,7 +73,7 @@ class HierarchicalCodeEncoder(nn.Module):
         if self.temperature is not None:
             setattr(self._encoder.discretizer, "temperature", value)
 
-    def summary(self):
+    def summary(self, include_submodules: bool = False, flatten: bool = False):
         ret = {
             "n_ary": self.n_ary,
             "n_digits": self.n_digits,
@@ -81,10 +82,18 @@ class HierarchicalCodeEncoder(nn.Module):
             "use_initial_state_encoder": self.use_initial_state_encoder,
             "global_attention_type": self.global_attention_type,
             "teacher_forcing": self.teacher_forcing,
-            "has_discretizer": self.has_discretizer,
-            "discretizer.temperature": self.temperature,
-            "prob_zero_monotone_increasing": self._encoder._prob_zero_monotone_increasing
+            "has_discretizer": self.has_discretizer
         }
+        if include_submodules:
+            ret["encoder"] = self._encoder.summary()
+            if self.use_entity_vector_encoder:
+                ret["entity_vector_encoder"] = self._entity_vector_encoder.summary()
+            if self.use_initial_state_encoder:
+                ret["use_initial_state_encoder"] = self._initial_states_encoder.summary()
+
+            if flatten:
+                ret = pd.json_normalize(ret)
+
         return ret
 
     def forward(self, entity_span_avg_vectors: Optional[torch.Tensor] = None,

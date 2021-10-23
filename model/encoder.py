@@ -313,6 +313,13 @@ class LSTMEncoder(SimpleEncoder):
     def global_attention_type(self):
         return self._global_attention_type
 
+    def summary(self):
+        #ToDo: implement summary
+        ret = {}
+        if self.has_discretizer:
+            ret["discretizer"] = self._discretizer.summary()
+        return ret
+
 
 class TransformerEncoder(SimpleEncoder):
 

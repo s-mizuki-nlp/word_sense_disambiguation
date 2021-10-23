@@ -37,6 +37,13 @@ class EntityVectorEncoder(MultiheadAttention):
 
         return entity_vectors
 
+    def summary(self):
+        ret = {
+            "class_name":self.__class__.__name__,
+            "num_heads":self.num_heads,
+            "embed_dim":self.embed_dim
+        }
+        return ret
 
 class InitialStatesEncoder(EntityVectorEncoder):
 
@@ -69,3 +76,11 @@ class InitialStatesEncoder(EntityVectorEncoder):
         t_c = self._v_to_c(t_v)
 
         return (t_h, t_c)
+
+    def summary(self):
+        ret = {
+            "class_name":self.__class__.__name__,
+            "num_heads":self.num_heads,
+            "embed_dim":self.embed_dim
+        }
+        return ret
