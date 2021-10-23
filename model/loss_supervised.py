@@ -310,7 +310,8 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         return t_log_lca
 
     def calc_soft_lowest_common_ancestor_length(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
-        return self.calc_log_soft_lowest_common_ancestor_length(t_prob_c_x, t_prob_c_y)
+        t_log_lca = self.calc_log_soft_lowest_common_ancestor_length(t_prob_c_x, t_prob_c_y)
+        return torch.exp(t_log_lca)
 
     def calc_synonym_probability(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
         log_probs = self.calc_log_synonym_probability(t_prob_c_x, t_prob_c_y)
@@ -542,3 +543,42 @@ class CrossEntropyLossWrapper(L.CrossEntropyLoss):
         input_score = torch.log(input_code_probabilities).swapaxes(1,2)
 
         return super().forward(input_score, target_codes)
+
+
+class FocalCrossEntropyLoss(nn.CrossEntropyLoss):
+    ''' Focal loss for classification tasks on imbalanced datasets '''
+
+    def __init__(self, gamma: float = 1.0, along_with_axes: str = "sample", alpha=None, ignore_index=-100, reduction="mean"):
+        set_valid_axies = {"sample", "digit"}
+        assert along_with_axes in set_valid_axies, f"unknown `along_with` parameter. it must be {set_valid_axies}"
+
+        super().__init__(weight=alpha, ignore_index=ignore_index, reduction="none")
+        self.along_with_axes = along_with_axes
+        self.reduction = reduction
+        self.gamma = gamma
+
+    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.Tensor) -> torch.Tensor:
+        # input_code_probabilities: (n_batch, n_digits, n_ary)
+        input_score = torch.log(input_code_probabilities).swapaxes(1,2)
+
+        # it returns sample and class wise log cross entropy.
+        # cross_entropy: (n_batch, n_digits); cross_entropy[b][d] = -log(input_code_probabilities[b][d][target_codes[b][d]])
+        cross_entropy = super().forward(input_score, target_codes)
+
+        # focal_loss_probs: (n_batch, n_digits) or (n_batch,)
+        # loss: (n_batch,)
+        if self.along_with_axes == "digit":
+            # loss[b] = -\sum_{d}{(1-p(Y_d=y_d))^{\gamma}lnp(Y_d=y_d)}
+            focal_loss_probs = torch.exp(-cross_entropy)
+            loss = (torch.pow(1 - focal_loss_probs, self.gamma) * cross_entropy).sum(dim=-1)
+        elif self.along_with_axes == "sample":
+            # loss[b] = -(1-p(Y=y))^{\gamma} \cdot \sum_{d}lnp(Y_d=y_d)
+            focal_loss_probs = torch.exp(-torch.sum(cross_entropy, dim=-1))
+            loss = torch.pow(1 - focal_loss_probs, self.gamma) * cross_entropy.sum(dim=-1)
+
+        if self.reduction == 'mean':
+            return torch.mean(loss)
+        elif self.reduction == 'sum':
+            return torch.sum(loss)
+        else:
+            return loss
