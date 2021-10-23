@@ -50,7 +50,7 @@ class SenseCodeTrainer(pl.LightningModule):
         self.n_digits = model.n_digits
 
         # ToDo: implement hyper-parameter export feature on encoder when saving hyper-parameters are helpful.
-        self.save_hyperparameters({"n_ary":model.n_ary})
+        self.save_hyperparameters({"n_ary":model.n_ary, "n_digits":model.n_digits, "encoder":{"n_dim_hidden":model.n_dim_hidden}})
 
         self._learning_rate = learning_rate
         self._dataloaders = {
@@ -60,7 +60,8 @@ class SenseCodeTrainer(pl.LightningModule):
         }
         self._optimizer_class = optimizer_class
         # auxiliary function that is solely used for validation
-        self._auxiliary = HyponymyScoreLoss()
+        self._aux_hyponymy_score = HyponymyScoreLoss()
+        self._aux_cross_entropy = CrossEntropyLossWrapper()
 
         # set model parameter scheduler
         if model_parameter_schedulers is None:
@@ -101,28 +102,34 @@ class SenseCodeTrainer(pl.LightningModule):
         t_codes, t_code_probs = self._model.forward(x)
         return t_codes, t_code_probs
 
-    def _evaluate_code_stats(self, t_target_codes: torch.Tensor, t_code_probs_pred: torch.Tensor, eps: float = 1E-7):
+    def _evaluate_code_stats(self, target_codes: torch.Tensor, predicted_code_probs: torch.Tensor, eps: float = 1E-15):
         # one-hot encoding without smoothing
         n_ary = self._model.n_ary
-        t_code_probs_gt = self._auxiliary._one_hot_encoding(t_codes=t_target_codes, n_ary=n_ary, label_smoothing_factor=0.0)
+        t_code_probs_gt = self._aux_hyponymy_score._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=0.0)
 
         # code lengths
-        t_code_length_gt = (t_target_codes != 0).sum(axis=-1).type(torch.float)
-        t_soft_code_length_pred = self._auxiliary.calc_soft_code_length(t_code_probs_pred)
+        t_code_length_gt = (target_codes != 0).sum(axis=-1).type(torch.float)
+        t_soft_code_length_pred = self._aux_hyponymy_score.calc_soft_code_length(predicted_code_probs)
 
         # common prefix lengths
-        t_soft_cpl = self._auxiliary.calc_soft_lowest_common_ancestor_length(t_prob_c_x=t_code_probs_gt, t_prob_c_y=t_code_probs_pred)
+        t_soft_cpl = self._aux_hyponymy_score.calc_soft_lowest_common_ancestor_length(t_prob_c_x=t_code_probs_gt, t_prob_c_y=predicted_code_probs)
         t_lca_vs_gt_ratio = t_soft_cpl / t_code_length_gt
         t_pred_vs_gt_ratio = t_soft_code_length_pred / t_code_length_gt
 
-        code_probability_divergence = torch.mean(np.log(n_ary) + torch.sum(t_code_probs_pred * torch.log(t_code_probs_pred + eps), axis=-1), axis=-1)
+        # cross entropy
+        t_cross_entropy = self._aux_cross_entropy.forward(input_code_probabilities=predicted_code_probs, target_codes=target_codes)
+
+        # code diversity
+        code_probability_divergence = torch.mean(np.log(n_ary) + torch.sum(predicted_code_probs * torch.log(predicted_code_probs + eps), axis=-1), axis=-1)
 
         metrics = {
+            "val_cross_entropy":t_cross_entropy,
+            "val_soft_cpl":torch.mean(t_soft_cpl),
+            "val_soft_cpl_vs_gt_ratio":torch.mean(t_lca_vs_gt_ratio),
             "val_soft_code_length_mean":torch.mean(t_soft_code_length_pred),
             "val_soft_code_length_std":torch.std(t_soft_code_length_pred),
-            "val_code_probability_divergence":torch.mean(code_probability_divergence),
-            "val_soft_lca_vs_gt_ratio":torch.mean(t_lca_vs_gt_ratio),
-            "val_soft_code_length_pred_vs_gt_ratio":torch.mean(t_pred_vs_gt_ratio)
+            "val_soft_code_length_pred_vs_gt_ratio":torch.mean(t_pred_vs_gt_ratio),
+            "val_code_probability_divergence":torch.mean(code_probability_divergence)
         }
         return metrics
 
@@ -174,7 +181,7 @@ class SenseCodeTrainer(pl.LightningModule):
 
     def _update_model_parameters(self, current_step: Optional[float] = None, verbose: bool = False):
         if current_step is None:
-            current_step = self.current_epoch / self.trainer.max_nb_epochs
+            current_step = self.current_epoch / self.trainer.max_epochs
 
         for parameter_name, scheduler_function in self._model_parameter_schedulers.items():
             if scheduler_function is None:
@@ -190,7 +197,7 @@ class SenseCodeTrainer(pl.LightningModule):
 
     def _update_loss_parameters(self, current_step: Optional[float] = None, verbose: bool = False):
         if current_step is None:
-            current_step = self.current_epoch / self.trainer.max_nb_epochs
+            current_step = self.current_epoch / self.trainer.max_epochs
 
         for loss_name, dict_property_scheduler in self._loss_parameter_schedulers.items():
             # get loss layer
@@ -218,7 +225,7 @@ class SenseCodeTrainer(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
 
-        current_step = self.trainer.global_step / (self.trainer.max_nb_epochs * self.trainer.total_batches)
+        current_step = self.trainer.global_step / (self.trainer.max_epochs * self.trainer.num_training_batches)
         self._update_model_parameters(current_step, verbose=False)
         self._update_loss_parameters(current_step, verbose=False)
 
@@ -264,7 +271,7 @@ class SenseCodeTrainer(pl.LightningModule):
         }
 
         # analysis metrics
-        metrics_repr = self._evaluate_code_stats(target_codes=t_target_codes, input_code_probabilities=t_code_probs)
+        metrics_repr = self._evaluate_code_stats(target_codes=t_target_codes, predicted_code_probs=t_code_probs)
         metrics.update(metrics_repr)
 
         self.log_dict(metrics)
