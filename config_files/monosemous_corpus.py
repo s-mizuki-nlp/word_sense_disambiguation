@@ -6,13 +6,13 @@ import sys, io, os
 DIR_TRAIN_UNSUPERVISED = "/home/sakae/Windows/dataset/word_sense_disambiguation/monosemous_word_annotated_corpus/bert_embeddings/"
 
 cfg_training = {
-    "wikitext103-bert-base-cased": {
-        "path":os.path.join(DIR_TRAIN_UNSUPERVISED, "bert-base-cased_wikitext103_train_freq=10-100_len=6-128.hdf5"),
+    "wikitext103-subset": {
+        "path":os.path.join(DIR_TRAIN_UNSUPERVISED, "bert-large-cased_wikitext103_train_freq=10-11_len=6-128.hdf5"),
         "padding": False,
         "max_sequence_length": None,
-        "description": "BERT-base-cased. Wikitext-103 trainset, freq=10~100, length=6~128."
+        "description": "BERT-large-cased. subset of the Wikitext-103 trainset, freq=10~11, length=6~128."
     },
-    "wiki40b-first-paragraph": {
+    "wiki40b-first-paragraph-bert-base": {
         "path":os.path.join(DIR_TRAIN_UNSUPERVISED, "bert-base-cased_wiki40b-train-first-paragraph_freq=10-100_len=6-128.hdf5"),
         "padding": False,
         "max_sequence_length": None,
