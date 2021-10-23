@@ -23,6 +23,13 @@ cfg_evaluation = {
         "lookup_candidate_senses": True,
         "description": "WSD Evaluation Framework dataset [Raganato+, 2017]: ALL",
     },
+    "WSDEval-noun-verb": {
+        "path_corpus": os.path.join(DIR_EVALSET, "ALL/ALL.data.xml"),
+        "path_ground_truth_labels": os.path.join(DIR_EVALSET, "ALL/ALL.gold.key.txt"),
+        "lookup_candidate_senses": True,
+        "entity_filter_function": _noun_verb_entity_selector,
+        "description": "WSD Evaluation Framework dataset [Raganato+, 2017]: Noun and verb entity only.",
+    },
     "WSDEval-ALL-bert-large-cased": {
         "path":os.path.join(DIR_EVALSET_EMBEDDINGS, "bert-large-cased_wsdeval-all.hdf5"),
         "padding": False,
@@ -39,6 +46,14 @@ cfg_training = {
         "lookup_candidate_senses": True,
         "filter_function": _no_entity_sentence_filter,
         "description": "WSD SemCor corpora, excluding no-sense-annotated sentences.",
+    },
+    "SemCor-noun-verb": {
+        "path_corpus": os.path.join(DIR_TRAINSET, "SemCor/semcor.data.xml"),
+        "path_ground_truth_labels": os.path.join(DIR_TRAINSET, "SemCor/semcor.gold.key.txt"),
+        "lookup_candidate_senses": True,
+        "filter_function": _no_entity_sentence_filter,
+        "entity_filter_function": _noun_verb_entity_selector,
+        "description": "WSD SemCor corpora, excluding no-sense-annotated sentences. selects noun and verb entity only.",
     },
     "SemCor-bert-large-cased": {
         "path":os.path.join(DIR_TRAINSET_EMBEDDINGS, "bert-large-cased_SemCor.hdf5"),

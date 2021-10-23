@@ -19,6 +19,7 @@ class WSDEvaluationDataset(Dataset):
                  lookup_candidate_senses: bool = True,
                  transform_functions = None,
                  filter_function: Optional[Union[Callable, List[Callable]]] = None,
+                 entity_filter_function: Optional[Union[Callable, List[Callable]]] = None,
                  description: str = ""):
 
         """
@@ -54,6 +55,13 @@ class WSDEvaluationDataset(Dataset):
         elif not isinstance(filter_function, list):
             self._filter_function = [filter_function]
 
+        if entity_filter_function is None:
+            self._entity_filter_function = []
+        elif isinstance(entity_filter_function, list):
+            self._entity_filter_function = entity_filter_function
+        elif not isinstance(entity_filter_function, list):
+            self._entity_filter_function = [entity_filter_function]
+
         self._n_sample = None
 
     def _load_ground_truth_labels(self, path: str):
@@ -64,6 +72,14 @@ class WSDEvaluationDataset(Dataset):
                 key, labels = lst_[0], lst_[1:]
                 dict_labels[key] = labels
         return dict_labels
+
+    def _entity_filter(self, lst_entities: List[Dict[str, Any]]):
+        lst_ret = []
+        for entity in lst_entities:
+            is_filtered_entity = any([filter_function(entity) for filter_function in self._entity_filter_function])
+            if not is_filtered_entity:
+                lst_ret.append(entity)
+        return lst_ret
 
     def _lookup_candidate_senses_from_wordnet(self, lemma: str, pos: str) -> List[Dict[str, str]]:
         lst_lemmas = wn.lemmas(lemma, pos=pos)
@@ -164,6 +180,9 @@ class WSDEvaluationDataset(Dataset):
                 # verify the entry is valid or not
                 if self._filter(entry) == True:
                     continue
+                # filter entities
+                record["entities"] = self._entity_filter(record["entities"])
+
                 self._records.append(entry)
 
         return self._records
