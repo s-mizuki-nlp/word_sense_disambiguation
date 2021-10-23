@@ -50,7 +50,8 @@ class SenseCodeTrainer(pl.LightningModule):
         self.n_digits = model.n_digits
 
         # ToDo: implement hyper-parameter export feature on encoder when saving hyper-parameters are helpful.
-        self.save_hyperparameters({"n_ary":model.n_ary, "n_digits":model.n_digits, "encoder":{"n_dim_hidden":model.n_dim_hidden}})
+        hparams = {"n_ary":model.n_ary, "n_digits":model.n_digits, "encoder.n_dim_hidden":model.n_dim_hidden}
+        self.save_hyperparameters(hparams)
 
         self._learning_rate = learning_rate
         self._dataloaders = {
@@ -89,6 +90,19 @@ class SenseCodeTrainer(pl.LightningModule):
             opt = self._optimizer_class(params=self.parameters(), lr=self._learning_rate)
         return opt
 
+    def metrics(self) -> Dict[str, str]:
+        map_metric_to_validation = {
+            "hp/common_prefix_length":"val_soft_cpl",
+            "hp/cross_entropy":"val_soft_cpl_vs_gt_ratio",
+            "hp/relative_common_prefix_length":"val_cross_entropy",
+            "hp/inclusion_probs":"val_code_inclusion_probability"
+        }
+        return map_metric_to_validation
+
+    def on_train_start(self) -> None:
+        init_metrics = {metric_name:0 for metric_name in self.metrics().keys()}
+        self.logger.log_hyperparams(params=self.hparams, metrics=init_metrics)
+
     def train_dataloader(self):
         return self._dataloaders["train"]
 
@@ -101,37 +115,6 @@ class SenseCodeTrainer(pl.LightningModule):
     def forward(self, x):
         t_codes, t_code_probs = self._model.forward(x)
         return t_codes, t_code_probs
-
-    def _evaluate_code_stats(self, target_codes: torch.Tensor, predicted_code_probs: torch.Tensor, eps: float = 1E-15):
-        # one-hot encoding without smoothing
-        n_ary = self._model.n_ary
-        t_code_probs_gt = self._aux_hyponymy_score._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=0.0)
-
-        # code lengths
-        t_code_length_gt = (target_codes != 0).sum(axis=-1).type(torch.float)
-        t_soft_code_length_pred = self._aux_hyponymy_score.calc_soft_code_length(predicted_code_probs)
-
-        # common prefix lengths
-        t_soft_cpl = self._aux_hyponymy_score.calc_soft_lowest_common_ancestor_length(t_prob_c_x=t_code_probs_gt, t_prob_c_y=predicted_code_probs)
-        t_lca_vs_gt_ratio = t_soft_cpl / t_code_length_gt
-        t_pred_vs_gt_ratio = t_soft_code_length_pred / t_code_length_gt
-
-        # cross entropy
-        t_cross_entropy = self._aux_cross_entropy.forward(input_code_probabilities=predicted_code_probs, target_codes=target_codes)
-
-        # code diversity
-        code_probability_divergence = torch.mean(np.log(n_ary) + torch.sum(predicted_code_probs * torch.log(predicted_code_probs + eps), axis=-1), axis=-1)
-
-        metrics = {
-            "val_cross_entropy":t_cross_entropy,
-            "val_soft_cpl":torch.mean(t_soft_cpl),
-            "val_soft_cpl_vs_gt_ratio":torch.mean(t_lca_vs_gt_ratio),
-            "val_soft_code_length_mean":torch.mean(t_soft_code_length_pred),
-            "val_soft_code_length_std":torch.std(t_soft_code_length_pred),
-            "val_soft_code_length_pred_vs_gt_ratio":torch.mean(t_pred_vs_gt_ratio),
-            "val_code_probability_divergence":torch.mean(code_probability_divergence)
-        }
-        return metrics
 
     def on_save_checkpoint(self, checkpoint):
         device = self._get_model_device()
@@ -250,6 +233,43 @@ class SenseCodeTrainer(pl.LightningModule):
         self.log_dict(dict_losses)
         return loss
 
+    def _evaluate_code_stats(self, target_codes: torch.Tensor, predicted_code_probs: torch.Tensor, eps: float = 1E-15):
+        # one-hot encoding without smoothing
+        n_ary = self._model.n_ary
+        t_code_probs_gt = self._aux_hyponymy_score._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=0.0)
+
+        # code lengths
+        t_code_length_gt = (target_codes != 0).sum(axis=-1).type(torch.float)
+        t_soft_code_length_pred = self._aux_hyponymy_score.calc_soft_code_length(predicted_code_probs)
+
+        # common prefix lengths
+        t_soft_cpl = self._aux_hyponymy_score.calc_soft_lowest_common_ancestor_length(t_prob_c_x=t_code_probs_gt, t_prob_c_y=predicted_code_probs)
+        t_lca_vs_gt_ratio = t_soft_cpl / t_code_length_gt
+        t_pred_vs_gt_ratio = t_soft_code_length_pred / t_code_length_gt
+
+        # entailment probability
+        t_prob_entail = self._aux_hyponymy_score.calc_ancestor_probability(t_prob_c_x=t_code_probs_gt, t_prob_c_y=predicted_code_probs)
+        t_prob_synonym = self._aux_hyponymy_score.calc_synonym_probability(t_prob_c_x=t_code_probs_gt, t_prob_c_y=predicted_code_probs)
+        t_prob_inclusion = t_prob_synonym + t_prob_entail
+
+        # cross entropy
+        t_cross_entropy = self._aux_cross_entropy.forward(input_code_probabilities=predicted_code_probs, target_codes=target_codes)
+
+        # code diversity
+        code_probability_divergence = torch.mean(np.log(n_ary) + torch.sum(predicted_code_probs * torch.log(predicted_code_probs + eps), axis=-1), axis=-1)
+
+        metrics = {
+            "val_cross_entropy":t_cross_entropy,
+            "val_soft_cpl":torch.mean(t_soft_cpl),
+            "val_soft_cpl_vs_gt_ratio":torch.mean(t_lca_vs_gt_ratio),
+            "val_soft_code_length_mean":torch.mean(t_soft_code_length_pred),
+            "val_code_inclusion_probability":torch.mean(t_prob_inclusion),
+            "val_soft_code_length_std":torch.std(t_soft_code_length_pred),
+            "val_soft_code_length_pred_vs_gt_ratio":torch.mean(t_pred_vs_gt_ratio),
+            "val_code_probability_divergence":torch.mean(code_probability_divergence)
+        }
+        return metrics
+
     def validation_step(self, batch, batch_idx):
 
         # forward computation without back-propagation
@@ -275,6 +295,10 @@ class SenseCodeTrainer(pl.LightningModule):
         metrics.update(metrics_repr)
 
         self.log_dict(metrics)
+
+        # copy metrics to hyper parameters
+        for metric_name, validation_metric_name in self.metrics().items():
+            self.log(metric_name, metrics_repr[validation_metric_name])
 
         return None
 
