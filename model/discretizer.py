@@ -40,6 +40,13 @@ class StraightThroughEstimator(nn.Module):
     def temperature(self, value):
         self._temperature = value
 
+    def summary(self):
+        ret = {
+            "class_name": self.__class__.__name__,
+            "temperature": self.temperature
+        }
+        return ret
+
 
 class GumbelSoftmax(nn.Module):
 
@@ -104,6 +111,13 @@ class Entmax15Estimator(nn.Module):
     def temperature(self, value):
         self._temperature = value
 
+    def summary(self):
+        ret = {
+            "class_name": self.__class__.__name__,
+            "temperature": self.temperature
+        }
+        return ret
+
 
 class SparsemaxEstimator(nn.Module):
 
@@ -133,41 +147,9 @@ class SparsemaxEstimator(nn.Module):
     def temperature(self, value):
         self._temperature = value
 
-
-class MaskedGumbelSoftmax(GumbelSoftmax):
-
-    def _dtype_and_device(self, t: torch.Tensor):
-        return t.dtype, t.device
-
-    def forward(self, probs, dim: int = -1):
-        """
-        apply gumbel-softmax trick only on nonzero probabilities.
-
-        @param probs: code probability distribution. shape: (n_batch, *, n_ary)
-        @param dim: dimension that GS trick is applied along with.
-        @return: sampled probability distribution.
-        """
-        dtype, device = self._dtype_and_device(probs)
-        n_ary = probs.shape[-1]
-
-        # split p(C_n=0|x) and p(C_n!=0|x)
-        # t_p_c_zero: (n_batch, n_digits, 1)
-        probs_zero = torch.index_select(probs, dim=-1, index=torch.tensor(0, device=device))
-        # t_p_c_nonzero: (n_batch, n_digits, n_ary-1)
-        probs_nonzero = torch.index_select(probs, dim=-1, index=torch.arange(1, n_ary, dtype=torch.long, device=device))
-
-        # apply gumbel-softmax trick only on nonzero probabilities
-        gumbels_nonzero = super().forward(probs_nonzero, dim=-1)
-
-        # concat with zero-probs and nonzero-probs
-        y_soft = torch.cat((probs_zero, (1.0-probs_zero)*gumbels_nonzero), dim=-1)
-
-        return y_soft
-
-    @property
-    def temperature(self):
-        return self._temperature
-
-    @temperature.setter
-    def temperature(self, value):
-        self._temperature = value
+    def summary(self):
+        ret = {
+            "class_name": self.__class__.__name__,
+            "temperature": self.temperature
+        }
+        return ret
