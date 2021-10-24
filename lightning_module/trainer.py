@@ -141,8 +141,8 @@ class SenseCodeTrainer(pl.LightningModule):
         model = pickle.loads(checkpoint["model_dump"])
         if on_gpu:
             model = model.cuda(device=map_location)
-        state_dict = {key.replace("_model.", ""):param for key, param in checkpoint["state_dict"].items()}
-        model.load_state_dict(state_dict)
+        model_state_dict = {key.replace("_model.", ""):param for key, param in checkpoint["state_dict"].items() if key.startswith("_model")}
+        model.load_state_dict(model_state_dict, strict=False)
 
         # fix model attributes for backward compatibility.
         if fix_model_missing_attributes:
