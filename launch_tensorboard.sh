@@ -1,2 +1,2 @@
 #!/bin/bash
-tensorboard --logdir ./checkpoints/
+tensorboard --logdir ./checkpoints/ --bind_all
