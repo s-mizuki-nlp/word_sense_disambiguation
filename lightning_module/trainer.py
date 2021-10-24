@@ -16,13 +16,13 @@ from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 from torch.nn.modules.loss import _Loss
 from torch.optim import Adam
-import pytorch_lightning as pl
+from pytorch_lightning import LightningModule
 
 from model import HierarchicalCodeEncoder
 from model.loss_supervised import HyponymyScoreLoss, EntailmentProbabilityLoss, CrossEntropyLossWrapper
 
 
-class SenseCodeTrainer(pl.LightningModule):
+class SenseCodeTrainer(LightningModule):
 
     def __init__(self,
                  model: HierarchicalCodeEncoder,
