@@ -158,13 +158,16 @@ class SynsetDataset(NDJSONDataset, Dataset):
         if lemma_lowercase:
             if transform_functions is None:
                 transform_functions = {}
-            transform_functions["lemmas"] = lambda lst_lemmas: [lemma.lower() for lemma in lst_lemmas]
+            transform_functions["lemmas"] = self._lowercase
 
         super().__init__(path, binary, transform_functions, filter_function, n_rows, description, **kwargs_for_json_loads)
         self._lemma_lowercase = lemma_lowercase
         self._lookup_lemma_keys = lookup_lemma_keys
 
         self._synsets = self._setup_lexical_knowledge()
+
+    def _lowercase(self, lst_strings: List[str]):
+        return [string.lower() for string in lst_strings]
 
     def _synset_code_to_lookup_key(self, synset_code: List[int]):
         return "-".join(map(str, synset_code))
