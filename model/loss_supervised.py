@@ -544,6 +544,10 @@ class CrossEntropyLossWrapper(L.CrossEntropyLoss):
 
         return super().forward(input_score, target_codes)
 
+    @property
+    def scale(self):
+        return 1.0
+
 
 class FocalCrossEntropyLoss(nn.CrossEntropyLoss):
     ''' Focal loss for classification tasks on imbalanced datasets '''
