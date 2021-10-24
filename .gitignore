@@ -1,6 +1,6 @@
 # custom
 log/
-jupyter_debug/
+checkpoints/
 saved_model/
 experiment_results/
 .data/
