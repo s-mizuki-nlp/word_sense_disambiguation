@@ -4,7 +4,7 @@ import warnings
 from typing import Optional, Iterable, Tuple, Set, Type, List, Dict, Callable, Union, Any
 
 from torch.utils.data import Dataset
-from nltk.corpus import wordnet as wn
+import nltk
 
 from .corpora import NDJSONDataset
 from .filter import DictionaryFilter
@@ -23,6 +23,8 @@ class LemmaDataset(NDJSONDataset, Dataset):
                  description: str = "",
                  **kwargs_for_json_loads):
 
+        self._setup_wordnet()
+
         if monosemous_entity_only:
             monosemous_entity_filter = DictionaryFilter(includes={"is_monosemous":{True,}})
             if isinstance(filter_function, list):
@@ -37,6 +39,13 @@ class LemmaDataset(NDJSONDataset, Dataset):
         self._monosemous_entity_only = monosemous_entity_only
 
         self._lexical_knowledge = self._setup_lexical_knowledge()
+
+    def _setup_wordnet(self):
+        try:
+            nltk.find("corpora/wordnet")
+        except:
+            nltk.download("wordnet")
+        from nltk.corpus import wordnet as wn
 
     def _setup_lexical_knowledge(self) -> Dict[str, Any]:
         result = {}
@@ -155,6 +164,8 @@ class SynsetDataset(NDJSONDataset, Dataset):
                  description: str = "",
                  **kwargs_for_json_loads):
 
+        self._setup_wordnet()
+
         if lemma_lowercase:
             if transform_functions is None:
                 transform_functions = {}
@@ -165,6 +176,14 @@ class SynsetDataset(NDJSONDataset, Dataset):
         self._lookup_lemma_keys = lookup_lemma_keys
 
         self._synsets = self._setup_lexical_knowledge()
+
+
+    def _setup_wordnet(self):
+        try:
+            nltk.find("corpora/wordnet")
+        except:
+            nltk.download("wordnet")
+        from nltk.corpus import wordnet as wn
 
     def _lowercase(self, lst_strings: List[str]):
         return [string.lower() for string in lst_strings]
