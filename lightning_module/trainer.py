@@ -27,9 +27,6 @@ class SenseCodeTrainer(LightningModule):
     def __init__(self,
                  model: HierarchicalCodeEncoder,
                  loss_supervised: Union[HyponymyScoreLoss, EntailmentProbabilityLoss, CrossEntropyLossWrapper],
-                 dataloader_train: Optional[DataLoader] = None,
-                 dataloader_val: Optional[DataLoader] = None,
-                 dataloader_test: Optional[DataLoader] = None,
                  learning_rate: Optional[float] = 0.001,
                  optimizer_class: Optional[Optimizer] = None,
                  use_sampled_code_repr_for_loss_computation: bool = False,
@@ -54,11 +51,6 @@ class SenseCodeTrainer(LightningModule):
         self.save_hyperparameters(hparams)
 
         self._learning_rate = learning_rate
-        self._dataloaders = {
-            "train": dataloader_train,
-            "val": dataloader_val,
-            "test": dataloader_test
-        }
         self._optimizer_class = optimizer_class
         # auxiliary function that is solely used for validation
         self._aux_hyponymy_score = HyponymyScoreLoss()
@@ -102,15 +94,6 @@ class SenseCodeTrainer(LightningModule):
     def on_train_start(self) -> None:
         init_metrics = {metric_name:0 for metric_name in self.metrics().keys()}
         self.logger.log_hyperparams(params=self.hparams, metrics=init_metrics)
-
-    def train_dataloader(self):
-        return self._dataloaders["train"]
-
-    def val_dataloader(self):
-        return self._dataloaders["val"]
-
-    def test_dataloader(self):
-        return self._dataloaders["test"]
 
     def forward(self, x):
         t_codes, t_code_probs = self._model.forward(x)
