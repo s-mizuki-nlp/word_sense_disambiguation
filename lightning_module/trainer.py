@@ -85,8 +85,8 @@ class SenseCodeTrainer(LightningModule):
     def metrics(self) -> Dict[str, str]:
         map_metric_to_validation = {
             "hp/common_prefix_length":"val_soft_cpl",
-            "hp/cross_entropy":"val_soft_cpl_vs_gt_ratio",
-            "hp/relative_common_prefix_length":"val_cross_entropy",
+            "hp/cross_entropy":"val_cross_entropy",
+            "hp/relative_common_prefix_length":"val_soft_cpl_vs_gt_ratio",
             "hp/inclusion_probs":"val_code_inclusion_probability"
         }
         return map_metric_to_validation
