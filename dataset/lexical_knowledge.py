@@ -5,7 +5,7 @@ from typing import Optional, Iterable, Tuple, Set, Type, List, Dict, Callable, U
 
 from torch.utils.data import Dataset
 import nltk
-
+from nltk.corpus import wordnet as wn
 from .corpora import NDJSONDataset
 from .filter import DictionaryFilter
 from .utils import lemma_pos_to_tuple
@@ -45,7 +45,7 @@ class LemmaDataset(NDJSONDataset, Dataset):
             nltk.find("corpora/wordnet")
         except:
             nltk.download("wordnet")
-        from nltk.corpus import wordnet as wn
+
 
     def _setup_lexical_knowledge(self) -> Dict[str, Any]:
         result = {}
@@ -183,7 +183,6 @@ class SynsetDataset(NDJSONDataset, Dataset):
             nltk.find("corpora/wordnet")
         except:
             nltk.download("wordnet")
-        from nltk.corpus import wordnet as wn
 
     def _lowercase(self, lst_strings: List[str]):
         return [string.lower() for string in lst_strings]
