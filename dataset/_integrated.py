@@ -187,18 +187,11 @@ class WSDTaskDataset(IterableDataset):
                 _ = record.pop(exclude_field, None)
             yield record
 
-    def _count_records(self):
+    def count_records(self):
         n_records = 0
         for _ in self:
             n_records += 1
         return n_records
-
-    def __len__(self):
-        if hasattr(self, "_n_records"):
-            return self._n_records
-        else:
-            self._n_records  = self._count_records()
-            return self._n_records
 
     @property
     def lemma_dataset(self):
