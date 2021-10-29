@@ -62,7 +62,6 @@ class HyponymyScoreLossLayer(unittest.TestCase):
         self._normalize_code_length = False
         self._normalize_coefficient_for_ground_truth = None
         self._loss_layer = HyponymyScoreLoss(normalize_hyponymy_score=self._normalize_code_length,
-                                             normalize_coefficient_for_ground_truth=self._normalize_coefficient_for_ground_truth,
                                              distance_metric="mse")
 
     def test_intensity_to_probability(self):
@@ -133,6 +132,15 @@ class HyponymyScoreLossLayer(unittest.TestCase):
         actual = self._loss_layer.calc_soft_lowest_common_ancestor_length(t_test_x, t_test_y).data.numpy()
 
         self.assertTrue(np.allclose(expected, actual))
+
+    def test_hard_common_prefix_length(self):
+        t_gt = torch.tensor([[1,2,3],[1,2,3],[1,2,3],[1,2,0],[0,1,1],[1,2,3]])
+        t_pred = torch.tensor([[1,0,2],[1,0,3],[1,2,0],[1,2,3],[0,1,1],[1,2,3]])
+
+        expected = utils.batch_calc_lowest_common_ancestor_length(t_gt.data.numpy(), t_pred.data.numpy())
+        actual = self._loss_layer.calc_hard_common_ancestor_length(t_gt, t_pred).data.numpy()
+
+        self.assertListEqual(expected.tolist(), actual.tolist())
 
     def test_soft_hyponymy_score(self):
 
