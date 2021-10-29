@@ -177,7 +177,7 @@ class LSTMEncoder(SimpleEncoder):
 
         return h_0, c_0, e_0
 
-    def forward(self, entity_vectors: torch.Tensor,
+    def forward(self, entity_vectors: Optional[torch.Tensor] = None,
                 ground_truth_synset_codes: Optional[torch.Tensor] = None,
                 context_embeddings: Optional[torch.Tensor] = None,
                 context_sequence_lengths: Optional[torch.Tensor] = None,
@@ -192,8 +192,14 @@ class LSTMEncoder(SimpleEncoder):
         @param on_inference: inference(True) or training(False)
         @return: tuple of (sampled codes, code probabilities). shape: (n_batch, n_digits, n_ary)
         """
-        dtype, device = self._dtype_and_device(entity_vectors)
-        n_batch = entity_vectors.shape[0]
+        if entity_vectors is not None:
+            t = entity_vectors
+        elif init_states is not None:
+            t = init_states
+        else:
+            raise AssertionError(f"neighter `entity_vectors` nor `init_states` is available.")
+        dtype, device = self._dtype_and_device(t)
+        n_batch = t.shape[0]
 
         if on_inference:
             ground_truth_synset_codes = None
@@ -312,6 +318,10 @@ class LSTMEncoder(SimpleEncoder):
     @property
     def global_attention_type(self):
         return self._global_attention_type
+
+    @property
+    def input_entity_vector(self):
+        return self._input_entity_vector
 
     def summary(self):
         #ToDo: implement summary

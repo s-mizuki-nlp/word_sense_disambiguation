@@ -122,8 +122,11 @@ class HierarchicalCodeEncoder(nn.Module):
             ## 2. use entity span averaged vectors as it is.
             elif entity_span_avg_vectors is not None:
                 entity_vectors = entity_span_avg_vectors
+            ## 3. encoder does not use entity vector.
+            elif self._encoder.input_entity_vector == False:
+                entity_vectors = None
             else:
-                raise ValueError(f"We couldn't obtain entity vectors.")
+                raise ValueError(f"We couldn't prepare entity vectors.")
 
             # initial states
             if self.use_initial_state_encoder:
