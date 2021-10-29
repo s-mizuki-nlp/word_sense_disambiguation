@@ -290,6 +290,11 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
         return t_log_prob
 
+    def calc_hard_common_ancestor_length(self, t_code_gt: torch.Tensor, t_code_pred: torch.Tensor, mask_value: int = 0) -> torch.LongTensor:
+        where_match = torch.logical_and(t_code_gt == t_code_pred, t_code_gt != mask_value).type(torch.long)
+        common_prefix_length = torch.cumprod(where_match, dim=-1).sum(dim=-1)
+        return common_prefix_length
+
     def calc_log_soft_lowest_common_ancestor_length(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
         n_digits, n_ary = t_prob_c_x.shape[-2:]
         dtype, device = self._dtype_and_device(t_prob_c_x)
