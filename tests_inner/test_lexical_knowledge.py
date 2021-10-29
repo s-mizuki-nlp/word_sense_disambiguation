@@ -6,8 +6,43 @@ import unittest
 
 from nltk.corpus import wordnet as wn
 
-from dataset.lexical_knowledge import SynsetDataset
-from config_files.lexical_knowledge_datasets import cfg_synset_datasets
+from dataset.lexical_knowledge import SynsetDataset, LemmaDataset
+from config_files.lexical_knowledge_datasets import cfg_synset_datasets, cfg_lemma_datasets
+
+
+class LemmaDatasetTestCases(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._dataset = LemmaDataset(**cfg_lemma_datasets["WordNet-noun-verb-incl-instance"])
+
+    def test_lookup_synset_id_from_lemma_key(self):
+        for record in self._dataset:
+            for lemma_key in record["lemma_keys"].keys():
+                try:
+                    wn_lemma = wn.lemma_from_key(lemma_key)
+                except Exception as e:
+                    print(f"skip: {lemma_key}")
+                    continue
+
+                with self.subTest(lemma_key=lemma_key):
+                    expected = wn_lemma.synset().name()
+                    actual = self._dataset.get_synset_id_from_lemma_key(lemma_key)
+                    self.assertEqual(expected, actual)
+
+    def test_lookup_lexname_from_lemma_key(self):
+        for record in self._dataset:
+            for lemma_key in record["lemma_keys"].keys():
+                try:
+                    wn_lemma = wn.lemma_from_key(lemma_key)
+                except Exception as e:
+                    print(f"skip: {lemma_key}")
+                    continue
+
+                with self.subTest(lemma_key=lemma_key):
+                    expected = wn_lemma.synset().lexname()
+                    actual = self._dataset.get_lexname_from_lemma_key(lemma_key)
+                    self.assertEqual(expected, actual)
 
 
 class SynsetDatasetTestCases(unittest.TestCase):

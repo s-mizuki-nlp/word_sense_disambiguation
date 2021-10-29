@@ -2,6 +2,7 @@
 # -*- coding:utf-8 -*-
 import warnings
 from typing import Optional, Iterable, Tuple, Set, Type, List, Dict, Callable, Union, Any
+from collections import defaultdict
 
 from torch.utils.data import Dataset
 import nltk
@@ -39,6 +40,7 @@ class LemmaDataset(NDJSONDataset, Dataset):
         self._monosemous_entity_only = monosemous_entity_only
 
         self._lexical_knowledge = self._setup_lexical_knowledge()
+        self._lexical_knowledge_on_lemma_key = self._setup_lexical_knowledge_on_lemma_key()
 
     def _setup_wordnet(self):
         try:
@@ -54,6 +56,16 @@ class LemmaDataset(NDJSONDataset, Dataset):
             result[key] = record
         return result
 
+    def _setup_lexical_knowledge_on_lemma_key(self) -> Dict[str, Dict[str, str]]:
+        result = defaultdict(dict)
+        for record in self:
+            iter_synset_id_lexname_pair = zip(record["synset_ids"], record["lexnames"])
+            dict_synset_id_to_lexname = dict(iter_synset_id_lexname_pair)
+            for lemma_key, synset_id in record["lemma_keys"].items():
+                result[lemma_key]["synset_id"] = synset_id
+                result[lemma_key]["lexname"] = dict_synset_id_to_lexname[synset_id]
+        return result
+
     def __getitem__(self, lemma_pos: Tuple[str, str]):
         key = lemma_pos_to_tuple(lemma_pos[0], lemma_pos[1], self._lemma_lowercase)
         return self._lexical_knowledge[key]
@@ -63,11 +75,11 @@ class LemmaDataset(NDJSONDataset, Dataset):
         return key in self._lexical_knowledge
 
     def get_synset_id_from_lemma_key(self, lemma_key: str):
-        synset_id = wn.lemma_from_key(lemma_key).synset().name()
+        synset_id = self._lexical_knowledge_on_lemma_key[lemma_key]["synset_id"]
         return synset_id
 
     def get_lexname_from_lemma_key(self, lemma_key: str):
-        lexname = wn.lemma_from_key(lemma_key).synset().lexname()
+        lexname = self._lexical_knowledge_on_lemma_key[lemma_key]["lexname"]
         return lexname
 
     def get_synset_ids_from_lemma_keys(self, lemma_keys: Union[str, Iterable[str]]) -> List[str]:
