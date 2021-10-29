@@ -78,8 +78,8 @@ class HierarchicalCodeEncoder(nn.Module):
             "n_ary": self.n_ary,
             "n_digits": self.n_digits,
             "n_dim": self.n_dim_hidden,
-            "use_entity_vector_encoder": self.use_entity_vector_encoder,
-            "use_initial_state_encoder": self.use_initial_state_encoder,
+            "entity_vector_encoder": self.use_entity_vector_encoder,
+            "initial_state_encoder": self.use_initial_state_encoder,
             "global_attention_type": self.global_attention_type,
             "teacher_forcing": self.teacher_forcing,
             "has_discretizer": self.has_discretizer
@@ -89,7 +89,7 @@ class HierarchicalCodeEncoder(nn.Module):
             if self.use_entity_vector_encoder:
                 ret["entity_vector_encoder"] = self._entity_vector_encoder.summary()
             if self.use_initial_state_encoder:
-                ret["use_initial_state_encoder"] = self._initial_states_encoder.summary()
+                ret["initial_state_encoder"] = self._initial_states_encoder.summary()
 
             if flatten:
                 ret = pd.json_normalize(ret)
