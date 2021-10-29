@@ -2,7 +2,7 @@
 # -*- coding:utf-8 -*-
 
 from dataset.evaluation import EntityLevelWSDEvaluationDataset
-from wsd_task import CreateWSDTaskDataset
+from .wsd_task import CreateWSDTaskDataset
 from . import sense_annotated_corpus, monosemous_corpus, lexical_knowledge_datasets
 
 cfg_task_dataset = {
