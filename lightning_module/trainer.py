@@ -233,7 +233,11 @@ class SenseCodeTrainer(LightningModule):
 
         # hard common prefix lengths
         if predicted_codes is not None:
-            t_hard_cpl_batch = self._aux_hyponymy_score.calc_hard_common_ancestor_length(t_code_gt=target_codes, t_code_pred=predicted_codes)
+            if predicted_codes.ndim == 3:
+                t_code_pred = predicted_codes.argmax(dim=-1)
+            else:
+                t_code_pred = predicted_codes
+            t_hard_cpl_batch = self._aux_hyponymy_score.calc_hard_common_ancestor_length(t_code_gt=target_codes, t_code_pred=t_code_pred)
             t_hard_cpl = torch.mean(t_hard_cpl_batch)
         else:
             t_hard_cpl = None
