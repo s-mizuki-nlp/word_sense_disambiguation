@@ -82,6 +82,7 @@ class SenseCodeTrainer(LightningModule):
             opt = self._optimizer_class(params=self.parameters(), lr=self._learning_rate)
         return opt
 
+    @property
     def metrics(self) -> Dict[str, str]:
         map_metric_to_validation = {
             "hp/common_prefix_length":"val_soft_cpl",
@@ -92,7 +93,7 @@ class SenseCodeTrainer(LightningModule):
         return map_metric_to_validation
 
     def on_train_start(self) -> None:
-        init_metrics = {metric_name:0 for metric_name in self.metrics().keys()}
+        init_metrics = {metric_name:0 for metric_name in self.metrics.keys()}
         self.logger.log_hyperparams(params=self.hparams, metrics=init_metrics)
 
     def forward(self, x):
@@ -216,7 +217,7 @@ class SenseCodeTrainer(LightningModule):
         self.log_dict(dict_losses)
         return loss
 
-    def _evaluate_code_stats(self, target_codes: torch.Tensor, predicted_code_probs: torch.Tensor, eps: float = 1E-15):
+    def evaluate_metrics(self, target_codes: torch.Tensor, predicted_code_probs: torch.Tensor, predicted_codes: Optional[torch.Tensor] = None, eps: float = 1E-15):
         # one-hot encoding without smoothing
         n_ary = self._model.n_ary
         t_code_probs_gt = self._aux_hyponymy_score._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=0.0)
@@ -229,6 +230,13 @@ class SenseCodeTrainer(LightningModule):
         t_soft_cpl = self._aux_hyponymy_score.calc_soft_lowest_common_ancestor_length(t_prob_c_x=t_code_probs_gt, t_prob_c_y=predicted_code_probs)
         t_lca_vs_gt_ratio = t_soft_cpl / t_code_length_gt
         t_pred_vs_gt_ratio = t_soft_code_length_pred / t_code_length_gt
+
+        # hard common prefix lengths
+        if predicted_codes is not None:
+            t_hard_cpl_batch = self._aux_hyponymy_score.calc_hard_common_ancestor_length(t_code_gt=target_codes, t_code_pred=predicted_codes)
+            t_hard_cpl = torch.mean(t_hard_cpl_batch)
+        else:
+            t_hard_cpl = None
 
         # entailment probability
         t_prob_entail = self._aux_hyponymy_score.calc_ancestor_probability(t_prob_c_x=t_code_probs_gt, t_prob_c_y=predicted_code_probs)
@@ -243,6 +251,7 @@ class SenseCodeTrainer(LightningModule):
 
         metrics = {
             "val_cross_entropy":t_cross_entropy,
+            "val_hard_cpl":t_hard_cpl,
             "val_soft_cpl":torch.mean(t_soft_cpl),
             "val_soft_cpl_vs_gt_ratio":torch.mean(t_lca_vs_gt_ratio),
             "val_soft_code_length_mean":torch.mean(t_soft_code_length_pred),
@@ -274,13 +283,13 @@ class SenseCodeTrainer(LightningModule):
         }
 
         # analysis metrics
-        metrics_repr = self._evaluate_code_stats(target_codes=t_target_codes, predicted_code_probs=t_code_probs)
+        metrics_repr = self.evaluate_metrics(target_codes=t_target_codes, predicted_code_probs=t_code_probs, predicted_codes=t_codes)
         metrics.update(metrics_repr)
 
         self.log_dict(metrics)
 
         # copy metrics to hyper parameters
-        for metric_name, validation_metric_name in self.metrics().items():
+        for metric_name, validation_metric_name in self.metrics.items():
             self.log(metric_name, metrics_repr[validation_metric_name])
 
         return None
