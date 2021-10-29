@@ -1,17 +1,9 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 
-from typing import Dict, Any, Optional
-
-from . import sense_annotated_corpus, monosemous_corpus, lexical_knowledge_datasets
-
-from torch.utils.data import DataLoader
-
-from dataset import WSDTaskDataset, WSDTaskDatasetCollateFunction
-from dataset.lexical_knowledge import LemmaDataset, SynsetDataset
 from dataset.evaluation import EntityLevelWSDEvaluationDataset
-from dataset.contextualized_embeddings import BERTEmbeddingsDataset
-
+from wsd_task import CreateWSDTaskDataset
+from . import sense_annotated_corpus, monosemous_corpus, lexical_knowledge_datasets
 
 cfg_task_dataset = {
     "WSDEval": {
@@ -44,63 +36,24 @@ cfg_task_dataset = {
     }
 }
 
-
-def CreateWSDEvaluationTaskDataset(cfg_bert_embeddings: Dict[str, Any],
-                                   **kwargs):
-    dataset_bert_embeddings = BERTEmbeddingsDataset(**cfg_bert_embeddings)
-
-    dataset = WSDTaskDataset(
-        bert_embeddings_dataset=dataset_bert_embeddings,
-        lexical_knowledge_lemma_dataset=None,
-        lexical_knowledge_synset_dataset=None,
-        **kwargs
-    )
-    return dataset
-
-def CreateWSDTrainingTaskDataset(cfg_bert_embeddings: Dict[str, Any],
-                                 cfg_lemmas: Dict[str, Any],
-                                 cfg_synsets: Optional[Dict[str, Any]] = None,
-                                 **kwargs):
-    dataset_bert_embeddings = BERTEmbeddingsDataset(**cfg_bert_embeddings)
-    dataset_lemmas = LemmaDataset(**cfg_lemmas)
-    dataset_synsets = SynsetDataset(**cfg_synsets) if cfg_synsets is not None else None
-
-    dataset = WSDTaskDataset(
-        bert_embeddings_dataset=dataset_bert_embeddings,
-        lexical_knowledge_lemma_dataset=dataset_lemmas,
-        lexical_knowledge_synset_dataset=dataset_synsets,
-        **kwargs
-    )
-    return dataset
-
-
-def WSDTaskDataLoader(dataset: WSDTaskDataset,
-                      batch_size: int,
-                      cfg_collate_function: Dict[str, Any] = {},
-                      **kwargs):
-    if "is_trainset" not in cfg_collate_function:
-        cfg_collate_function["is_trainset"] = dataset.is_trainset
-    collate_fn = WSDTaskDatasetCollateFunction(**cfg_collate_function)
-    data_loader = DataLoader(dataset=dataset, batch_size=batch_size, collate_fn=collate_fn, **kwargs)
-
-    return data_loader
-
 ### pre-defined datasets ###
 wsd_eval_wo_embeddings = EntityLevelWSDEvaluationDataset(**sense_annotated_corpus.cfg_evaluation["WSDEval-ALL"])
 
-wsd_eval_bert_large_cased = CreateWSDEvaluationTaskDataset(
+wsd_eval_bert_large_cased = CreateWSDTaskDataset(
     cfg_bert_embeddings=sense_annotated_corpus.cfg_evaluation["WSDEval-ALL-bert-large-cased"],
+    cfg_lemmas=None,
+    cfg_synsets=None,
     **cfg_task_dataset["WSDEval"]
 )
 
-wsd_train_wikitext103_subset = CreateWSDTrainingTaskDataset(
+wsd_train_wikitext103_subset = CreateWSDTaskDataset(
     cfg_bert_embeddings=monosemous_corpus.cfg_training["wikitext103-subset"],
     cfg_lemmas=lexical_knowledge_datasets.cfg_lemma_datasets["WordNet-noun-verb-incl-instance"],
     cfg_synsets=lexical_knowledge_datasets.cfg_synset_datasets["WordNet-noun-verb-incl-instance"],
     **cfg_task_dataset["TrainOnMonosemousCorpus"]
 )
 
-wsd_train_wiki40b_all = CreateWSDTrainingTaskDataset(
+wsd_train_wiki40b_all = CreateWSDTaskDataset(
     cfg_bert_embeddings=monosemous_corpus.cfg_training["wiki40b-all"],
     cfg_lemmas=lexical_knowledge_datasets.cfg_lemma_datasets["WordNet-noun-verb-incl-instance"],
     cfg_synsets=lexical_knowledge_datasets.cfg_synset_datasets["WordNet-noun-verb-incl-instance"],
@@ -108,7 +61,7 @@ wsd_train_wiki40b_all = CreateWSDTrainingTaskDataset(
 )
 
 # synset code learningの評価用．WSDEval-noun-verbを使う．
-wsd_validate_bert_large_cased = CreateWSDTrainingTaskDataset(
+wsd_validate_bert_large_cased = CreateWSDTaskDataset(
     cfg_bert_embeddings=sense_annotated_corpus.cfg_evaluation["WSDEval-noun-verb-bert-large-cased"],
     cfg_lemmas=lexical_knowledge_datasets.cfg_lemma_datasets["WordNet-noun-verb-incl-instance"],
     cfg_synsets=lexical_knowledge_datasets.cfg_synset_datasets["WordNet-noun-verb-incl-instance"],
