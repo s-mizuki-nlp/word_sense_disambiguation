@@ -132,7 +132,8 @@ class FrequencyBasedMonosemousEntitySampler(object):
                  max_freq: Optional[int] = None,
                  path_monosemous_words_freq: Optional[str] = None,
                  dataset_monosemous_entity_annotated_corpus: Optional[Dataset] = None,
-                 lemma_lowercase: bool = True
+                 lemma_lowercase: bool = True,
+                 random_seed: int = 42
                  ):
         """
         単義語をsamplingする．指定頻度未満の単義語は削除，指定頻度以上の単義語はdown-samplingする．
@@ -160,8 +161,13 @@ class FrequencyBasedMonosemousEntitySampler(object):
 
         self._min_freq = 0 if min_freq is None else min_freq
         self._max_freq = float("inf") if max_freq is None else max_freq
-        self._lemma_pos_freq_so_far = defaultdict(int)
         self._lemma_lowercase = lemma_lowercase
+
+        np.random.seed(random_seed)
+        self._cursor = -1
+        self._random_values = np.random.uniform(size=2 ** 24)
+
+        self.reset()
 
     def _load_lemma_pos_freq(self, path: str):
         dict_freq = {}
@@ -183,6 +189,32 @@ class FrequencyBasedMonosemousEntitySampler(object):
 
         return cnt
 
+    def random_uniform(self) -> float:
+        self._cursor += 1
+        self._cursor %= self._random_values.size
+        return self._random_values[self._cursor]
+
+    def random_sampling(self, lemma_pos):
+        freq_total = self._lemma_pos_freq[lemma_pos]
+        freq_sampled = self._lemma_pos_freq_sampled[lemma_pos]
+        freq_missed = self._lemma_pos_freq_missed[lemma_pos]
+        freq_remain = freq_total - freq_missed
+
+        if  (freq_total < self._min_freq) or (freq_sampled >= self._max_freq):
+            is_sampled = False
+        elif freq_remain <= self._max_freq:
+            is_sampled = True
+        else:
+            # sampling based on total frequency
+            is_sampled = (self._max_freq / freq_total) > self.random_uniform()
+
+        if is_sampled:
+            self._lemma_pos_freq_sampled[lemma_pos] += 1
+        else:
+            self._lemma_pos_freq_missed[lemma_pos] += 1
+
+        return is_sampled
+
     def __call__(self, lst_entities: List[Dict[str, str]]):
         """
         @param lst_entities: list of dict like `[{'lemma': 'Dubonnet', 'pos': 'n', 'occurence': 0, 'span': [1, 2]}]`
@@ -190,13 +222,8 @@ class FrequencyBasedMonosemousEntitySampler(object):
         lst_ret = []
         for entity in lst_entities:
             lemma_pos = lemma_pos_to_tuple(lemma_lowercase=self._lemma_lowercase, **entity)
-            self._lemma_pos_freq_so_far[lemma_pos] += 1
-
-            if self._lemma_pos_freq[lemma_pos] < self._min_freq:
+            if not self.random_sampling(lemma_pos):
                 continue
-            if self._lemma_pos_freq_so_far[lemma_pos] > self._max_freq:
-                continue
-
             lst_ret.append(entity)
 
         return lst_ret
@@ -220,7 +247,8 @@ class FrequencyBasedMonosemousEntitySampler(object):
         return dict_cnt
 
     def reset(self):
-        self._lemma_pos_freq_so_far = defaultdict(int)
+        self._lemma_pos_freq_sampled = defaultdict(int)
+        self._lemma_pos_freq_missed = defaultdict(int)
 
     def verbose(self):
         ret = {
