@@ -21,7 +21,7 @@ from scipy.stats import spearmanr, kendalltau
 
 from model.loss_supervised import HyponymyScoreLoss
 
-from config_files.wsd_task_dataset import WSDTaskDataLoader
+from config_files.wsd_task import WSDTaskDataLoader
 from dataset import WSDTaskDataset
 from dataset.lexical_knowledge import SynsetDataset
 from dataset.evaluation import EntityLevelWSDEvaluationDataset
