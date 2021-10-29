@@ -195,7 +195,7 @@ class LSTMEncoder(SimpleEncoder):
         if entity_vectors is not None:
             t = entity_vectors
         elif init_states is not None:
-            t = init_states
+            t = init_states[0]
         else:
             raise AssertionError(f"neighter `entity_vectors` nor `init_states` is available.")
         dtype, device = self._dtype_and_device(t)
