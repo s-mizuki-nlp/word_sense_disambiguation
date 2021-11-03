@@ -210,7 +210,7 @@ class CodeLengthPredictionLoss(L._Loss):
 
 class HyponymyScoreLoss(CodeLengthPredictionLoss):
 
-    def __init__(self, scale: float = 1.0, normalize_hyponymy_score: bool = False,
+    def __init__(self, scale: float = 1.0, normalize_by_ground_truth_code_length: bool = False,
                  log_scale: bool = False,
                  margin_on_code_length_penalty: float = 0.0,
                  distance_metric: str = "mse",
@@ -221,7 +221,10 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
                     distance_metric=distance_metric,
                     size_average=size_average, reduce=reduce, reduction=reduction)
 
-        self._normalize_hyponymy_score = normalize_hyponymy_score
+        if (not log_scale) and (not normalize_by_ground_truth_code_length):
+            warnings.warn("we recommend you to set `normalize_by_ground_truth_code_length=True` for non-logarithmic scale.")
+
+        self._normalize_by_ground_truth_code_length = normalize_by_ground_truth_code_length
         self._label_smoothing_factor = label_smoothing_factor
         self._log_scale = log_scale
         self._margin_on_code_length_penalty = margin_on_code_length_penalty
@@ -377,8 +380,12 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
             l_lca = torch.exp(l_lca)
 
         # score = | lca - l_gt | + max(0, l_pred - l_gt - margin)
-        score = torch.abs(l_lca - l_ground_truth) + \
-                torch.clip(l_prediction - l_ground_truth - self._margin_on_code_length_penalty, min=0.0)
+        if (not log) and self._normalize_by_ground_truth_code_length:
+            score = torch.abs(l_lca/l_ground_truth - 1.0) + \
+                    torch.clip(l_prediction/l_ground_truth - 1.0 - self._margin_on_code_length_penalty, min=0.0)
+        else:
+            score = torch.abs(l_lca - l_ground_truth) + \
+                    torch.clip(l_prediction - l_ground_truth - self._margin_on_code_length_penalty, min=0.0)
 
         return score
 
@@ -401,11 +408,6 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         t_prob_c_x = self._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=self._label_smoothing_factor)
 
         y_pred = self.calc_soft_hyponymy_score(t_prob_c_x, t_prob_c_y, log=self._log_scale)
-
-        # scale ground-truth value and predicted value
-        if self._normalize_hyponymy_score:
-            # scale predicted value by the number of digits. then value range will be (-1, +1)
-            y_pred /= n_digits
 
         y_true = torch.zeros_like(y_pred)
         loss = self._func_distance(y_pred, y_true)
