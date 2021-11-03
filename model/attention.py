@@ -94,6 +94,7 @@ class InitialStatesEncoder(EntityVectorEncoder):
                          bias, add_bias_kv, add_zero_attn, kdim, vdim, batch_first)
 
         initial_state_dim = embed_dim if initial_state_dim is None else initial_state_dim
+        self._activation = nn.GELU()
         self._v_to_h = Linear(in_features=embed_dim, out_features=initial_state_dim)
         self._v_to_c = Linear(in_features=embed_dim, out_features=initial_state_dim)
 
@@ -113,7 +114,8 @@ class InitialStatesEncoder(EntityVectorEncoder):
         """
 
         # t_v: (n_batch, n_dim)
-        t_v = super().forward(entity_embeddings, context_embeddings, entity_sequence_mask, context_sequence_mask)
+        t_v_dash = super().forward(entity_embeddings, context_embeddings, entity_sequence_mask, context_sequence_mask)
+        t_v = self._activation(t_v_dash)
         t_h = self._v_to_h(t_v)
         t_c = self._v_to_c(t_v)
 
