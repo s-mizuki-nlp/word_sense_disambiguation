@@ -24,10 +24,16 @@ cfg_training = {
         "max_sequence_length": None,
         "description": "BERT-large-cased. Wiki40b trainset, freq=10~100, length=6~128."
     },
-    "wiki40b-all-ext": {
+    "wiki40b-all-wide-vocab": {
         "path":os.path.join(DIR_TRAIN_UNSUPERVISED, "bert-large-cased_wiki40b-train-all-paragraph_freq=5-200_len=6-128.hdf5"),
         "padding": False,
         "max_sequence_length": None,
         "description": "BERT-large-cased. Wiki40b trainset, unbiased, freq=5~200, length=6~128."
-    }
+    },
+    "wiki40b-all-narrow-vocab": {
+        "path":os.path.join(DIR_TRAIN_UNSUPERVISED, "bert-large-cased_wiki40b-train-all-paragraph_freq=100-300_len=6-128.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "description": "BERT-large-cased. Wiki40b trainset, freq=100~300, length=6~128."
+    },
 }
