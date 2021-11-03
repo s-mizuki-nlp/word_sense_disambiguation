@@ -25,9 +25,9 @@ cfg_training = {
         "description": "BERT-large-cased. Wiki40b trainset, freq=10~100, length=6~128."
     },
     "wiki40b-all-ext": {
-        "path":os.path.join(DIR_TRAIN_UNSUPERVISED, "bert-large-cased_wiki40b-train-all-paragraph_freq=10-200_len=6-128.hdf5"),
+        "path":os.path.join(DIR_TRAIN_UNSUPERVISED, "bert-large-cased_wiki40b-train-all-paragraph_freq=5-200_len=6-128.hdf5"),
         "padding": False,
         "max_sequence_length": None,
-        "description": "BERT-large-cased. Wiki40b trainset, freq=10~200, length=6~128."
+        "description": "BERT-large-cased. Wiki40b trainset, unbiased, freq=5~200, length=6~128."
     }
 }
