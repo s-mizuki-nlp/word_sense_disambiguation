@@ -53,14 +53,16 @@ class BaseEvaluator(object):
         else:
             return len(numerator) / len(denominator)
 
-    def f1_score(self, ground_truthes: Iterable[str], predictions: Iterable[str]):
-        prec = self.precision(ground_truthes, predictions)
-        recall = self.recall(ground_truthes, predictions)
-
+    def _calc_f1_score(self, prec: float, recall: float):
         if prec == recall == 0.0:
             return 0.0
         else:
             return 2*prec*recall/(prec+recall)
+
+    def f1_score(self, ground_truthes: Iterable[str], predictions: Iterable[str]):
+        prec = self.precision(ground_truthes, predictions)
+        recall = self.recall(ground_truthes, predictions)
+        return self._calc_f1_score(prec, recall)
 
     def accuracy(self, ground_truthes: Iterable[str], predictions: Iterable[str]):
         """
@@ -108,7 +110,22 @@ class BaseEvaluator(object):
         return dict_ret
 
 
-class WSDTaskEvaluatorBase(BaseEvaluator, metaclass=ABCMeta):
+class BaseEvaluatorByRaganato(BaseEvaluator):
+
+    def macro_average(self, lst_dict_metrics: List[Dict[str, float]]) -> Dict[str, float]:
+        """
+        wrong implementation that is used by [Raganato+, 2017]
+        source: http://lcl.uniroma1.it/wsdeval/data/WSD_Evaluation_Framework.zip -> Evaluation_Datasets/Scorer.java
+        """
+        dict_ret = super().macro_average(lst_dict_metrics)
+
+        n_ = len(lst_dict_metrics)
+        dict_ret["recall_by_raganato"] = dict_ret["precision"] * n_ / n_
+        dict_ret["f1_score_by_raganato"] = self._calc_f1_score(prec=dict_ret["precision"], recall=dict_ret["recall_by_raganato"])
+
+        return dict_ret
+
+class WSDTaskEvaluatorBase(BaseEvaluatorByRaganato, metaclass=ABCMeta):
 
     def __init__(self,
                  evaluation_dataset: Union[EntityLevelWSDEvaluationDataset, WSDTaskDataset],
@@ -141,8 +158,11 @@ class WSDTaskEvaluatorBase(BaseEvaluator, metaclass=ABCMeta):
             return tensor_or_list
 
     @abstractmethod
-    def predict(self, input: Dict[str, Any]) -> Iterable[str]:
+    def predict(self, input: Dict[str, Any], **kwargs) -> Iterable[str]:
         pass
+
+    def assertion(self):
+        return True
 
     def predict_batch(self, batch) -> List[Iterable[str]]:
         lst_ret = []
@@ -160,8 +180,10 @@ class WSDTaskEvaluatorBase(BaseEvaluator, metaclass=ABCMeta):
 
         for single_example_batch in self._evaluation_data_loader:
             if is_wsd_task_dataset:
-                inputs_for_predictor = single_example_batch
                 inputs_for_evaluator = single_example_batch["records"][0]
+                inputs_for_predictor = single_example_batch
+                del inputs_for_predictor["records"]
+                inputs_for_predictor.update(inputs_for_evaluator)
             else:
                 inputs_for_predictor = single_example_batch[0]
                 inputs_for_evaluator = single_example_batch[0]
@@ -173,7 +195,7 @@ class WSDTaskEvaluatorBase(BaseEvaluator, metaclass=ABCMeta):
 
         """
         for inputs_for_predictor, inputs_for_evaluator in self.iter_records():
-            predictions = self.predict(inputs_for_predictor)
+            predictions = self.predict(inputs_for_predictor, **self._predict_kwargs)
             ground_truthes = inputs_for_evaluator[self._ground_truth_lemma_keys_field_name]
             dict_metrics = self.compute_metrics(ground_truthes, predictions)
             yield inputs_for_predictor, inputs_for_evaluator, ground_truthes, predictions, dict_metrics
@@ -186,10 +208,13 @@ class WSDTaskEvaluatorBase(BaseEvaluator, metaclass=ABCMeta):
             self.n_sample = n_sample
         return self.n_sample
 
-    def evaluate(self):
+    def evaluate(self, **kwargs):
+        assert self.assertion(), f"assertion failed."
+
         dict_dict_results = defaultdict(lambda : defaultdict(list))
         dict_dict_results["ALL"] = []
 
+        self._predict_kwargs = kwargs
         for _, inputs_for_evaluator, ground_truthes, predicitons, dict_metrics in self:
             # store metrics
             dict_dict_results["ALL"].append(dict_metrics)
