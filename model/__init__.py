@@ -1,4 +1,4 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 
-from .core import HierarchicalCodeEncoder
+from .core import SenseCodeEncoder
