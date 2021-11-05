@@ -126,6 +126,7 @@ class WSDTaskEvaluatorBase(BaseEvaluatorByRaganato, metaclass=ABCMeta):
                  evaluation_dataset: Union[EntityLevelWSDEvaluationDataset, WSDTaskDataset],
                  ground_truth_lemma_keys_field_name: str = "ground_truth_lemma_keys",
                  breakdown_attributes: Optional[Iterable[Set[str]]] = None,
+                 verbose: bool = False,
                  **kwargs_dataloader):
 
         self._ground_truth_lemma_keys_field_name = ground_truth_lemma_keys_field_name
@@ -145,6 +146,7 @@ class WSDTaskEvaluatorBase(BaseEvaluatorByRaganato, metaclass=ABCMeta):
             self._breakdown_attributes = [{"corpus_id",}, {"pos_orig",}, {"corpus_id", "pos_orig"}]
         else:
             self._breakdown_attributes = breakdown_attributes
+        self.verbose = verbose
 
     def _tensor_to_list(self, tensor_or_list: Union[torch.Tensor, List]):
         if isinstance(tensor_or_list, torch.Tensor):
