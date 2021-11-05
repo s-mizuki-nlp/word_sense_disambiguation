@@ -30,7 +30,7 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
                  **kwargs_dataloader):
         super().__init__(evaluation_dataset, ground_truth_lemma_keys_field_name, breakdown_attributes, verbose, **kwargs_dataloader)
 
-        self._aux_hyponymy_score = HyponymyScoreLoss()
+        self._aux_hyponymy_score = HyponymyScoreLoss(log_scale=False)
         self._model = model
         self._lexical_knowledge_synset = evaluation_dataset.synset_dataset if lexical_knowledge_synset_dataset is None else lexical_knowledge_synset_dataset
         self._inference_metric = inference_metric
@@ -40,8 +40,11 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
         assert self._lexical_knowledge_synset is not None, f"You must specify `lexical_knowledge_synset_dataset` argument."
 
     def calc_common_prefix_lengths(self, predicted_code_probs: torch.Tensor, candidate_codes: torch.Tensor, return_ratio: bool) -> torch.Tensor:
+        # predicted_code_probs: (n_candidate, n_digits, n_ary)
+        # candidate_codes: (n_candidate, n_digits, n_ary)
+
         # candidate code lengths
-        t_code_length_candidates = (candidate_codes != 0).sum(axis=-1).type(torch.float)
+        t_code_length_candidates = (candidate_codes.argmax(dim=-1) != 0).sum(axis=-1).type(torch.float)
         # common prefix lengths
         t_soft_cpl = self._aux_hyponymy_score.calc_soft_lowest_common_ancestor_length(t_prob_c_x=candidate_codes, t_prob_c_y=predicted_code_probs)
         # ratio
@@ -53,6 +56,9 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
             return t_soft_cpl
 
     def calc_inclusion_probability(self, predicted_code_probs: torch.Tensor, candidate_codes: torch.Tensor, add_entailment_probs: bool) -> torch.Tensor:
+        # predicted_code_probs: (n_candidate, n_digits, n_ary)
+        # candidate_codes: (n_candidate, n_digits, n_ary)
+
         # entailment probability and synonym probability
         t_prob_entail = self._aux_hyponymy_score.calc_ancestor_probability(t_prob_c_x=candidate_codes, t_prob_c_y=predicted_code_probs)
         t_prob_synonym = self._aux_hyponymy_score.calc_synonym_probability(t_prob_c_x=candidate_codes, t_prob_c_y=predicted_code_probs)
@@ -72,7 +78,7 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
 
         n_candidates = t_candidate_codes.shape[0]
         # predicted_code_probs: (n_candidates, n_digits, n_ary)
-        predicted_code_probs = torch.tile(predicted_code_prob, (n_candidates,))
+        predicted_code_probs = torch.tile(predicted_code_prob, (n_candidates,1,1))
 
         # compute similarity score: bigger is better.
         if self._inference_metric == "common_prefix_length":
@@ -118,13 +124,19 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
             t_code_prob = self._aux_hyponymy_score._one_hot_encoding(t_codes=t_code_prob, n_ary=self._model.n_ary, label_smoothing_factor=0.0)
         # get candidates
         lst_candidate_lemmas = self.get_candidate_lemmas_from_wordnet(lemma, pos)
-        lst_synset_ids = [lemma.synset().key() for lemma in lst_candidate_lemmas]
+        lst_synset_ids = [lemma.synset().name() for lemma in lst_candidate_lemmas]
         lst_synset_codes = [self._lexical_knowledge_synset.get_synset_code(synset_id) for synset_id in lst_synset_ids]
         # t_candidate_codes: (n_candidates, n_digits, n_ary)
-        t_candidate_codes = torch.Tensor(lst_synset_codes, type=torch.LongTensor)
+        t_candidate_codes = torch.LongTensor(lst_synset_codes, device=t_code_prob.device)
         # calc score for each candidate using specified inference metric.
         lst_scores = self.score_by_inference_metric(candidate_codes=t_candidate_codes, predicted_code_prob=t_code_prob)
         # return top-k lemma keys
         return self.return_top_k_lemma_keys(lst_candidate_lemmas, lst_scores, multiple_output=output_tie_lemma)
 
-
+    def _print_verbose(self, lst_tup_lemma_and_score: List[Tuple[wn.lemma, float]]):
+        print(f"metric: {self._inference_metric}")
+        for lemma, score in lst_tup_lemma_and_score:
+            synset_id = lemma.synset().name()
+            sense_code = self._lexical_knowledge_synset.get_synset_code(synset_id)
+            str_sense_code = "-".join(map(str, sense_code))
+            print(f"{synset_id}-{lemma.key()}: {score:1.6f}, {str_sense_code}")
