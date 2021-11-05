@@ -19,14 +19,15 @@ from dataset import utils
 from .encoder import LSTMEncoder
 from .attention import EntityVectorEncoder, InitialStatesEncoder
 
-class SenseCodeEncoder(nn.Module):
+
+class HierarchicalCodeEncoder(nn.Module):
 
     def __init__(self, encoder: LSTMEncoder,
                  entity_vector_encoder: Optional[EntityVectorEncoder] = None,
                  initial_states_encoder: Optional[InitialStatesEncoder] = None,
                  **kwargs):
 
-        super(SenseCodeEncoder, self).__init__()
+        super(HierarchicalCodeEncoder, self).__init__()
         self._encoder = encoder
         self._encoder_class_name = encoder.__class__.__name__
         self._entity_vector_encoder = entity_vector_encoder

@@ -18,14 +18,14 @@ from torch.nn.modules.loss import _Loss
 from torch.optim import Adam
 from pytorch_lightning import LightningModule
 
-from model import SenseCodeEncoder
+from model import HierarchicalCodeEncoder
 from model.loss_supervised import HyponymyScoreLoss, EntailmentProbabilityLoss, CrossEntropyLossWrapper
 
 
 class SenseCodeTrainer(LightningModule):
 
     def __init__(self,
-                 model: SenseCodeEncoder,
+                 model: HierarchicalCodeEncoder,
                  loss_supervised: Union[HyponymyScoreLoss, EntailmentProbabilityLoss, CrossEntropyLossWrapper],
                  learning_rate: Optional[float] = 0.001,
                  optimizer_class: Optional[Optimizer] = None,
