@@ -75,5 +75,13 @@ try:
         cfg_synsets=lexical_knowledge_datasets.cfg_synset_datasets["WordNet-noun-verb-incl-instance"],
         **cfg_task_dataset["TrainOnMonosemousCorpus"]
     )
+
+    wsd_train_wiki40b_all_narrow_vocab = CreateWSDTaskDataset(
+        cfg_bert_embeddings=monosemous_corpus.cfg_training["wiki40b-all-narrow-vocab"],
+        cfg_lemmas=lexical_knowledge_datasets.cfg_lemma_datasets["WordNet-noun-verb-incl-instance"],
+        cfg_synsets=lexical_knowledge_datasets.cfg_synset_datasets["WordNet-noun-verb-incl-instance"],
+        **cfg_task_dataset["TrainOnMonosemousCorpus"]
+    )
+
 except Exception as e:
     print(e)
