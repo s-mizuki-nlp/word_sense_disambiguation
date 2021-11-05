@@ -138,7 +138,9 @@ class SenseCodeTrainer(LightningModule):
     def fix_missing_attributes(cls, model):
         if getattr(model._encoder, "internal_layer_class_type", None) is None:
             if model._encoder.__class__.__name__ == "LSTMEncoder":
-                pass
+                # d1bae73
+                if hasattr(model._encoder, "_apply_argmax_on_inference"):
+                    delattr(model._encoder, "_apply_argmax_on_inference")
             elif model._encoder.__class__.__name__ == "TransformerEncoder":
                 pass
             else:
