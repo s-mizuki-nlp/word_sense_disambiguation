@@ -147,12 +147,21 @@ class WSDTaskEvaluatorBase(BaseEvaluatorByRaganato, metaclass=ABCMeta):
         else:
             self._breakdown_attributes = breakdown_attributes
         self.verbose = verbose
+        self._predict_kwargs = {}
 
     def _tensor_to_list(self, tensor_or_list: Union[torch.Tensor, List]):
         if isinstance(tensor_or_list, torch.Tensor):
             return tensor_or_list.tolist()
         else:
             return tensor_or_list
+
+    @property
+    def predict_kwargs(self):
+        return self._predict_kwargs
+
+    @predict_kwargs.setter
+    def predict_kwargs(self, kwargs):
+        self._predict_kwargs = kwargs
 
     @abstractmethod
     def predict(self, input: Dict[str, Any], **kwargs) -> Iterable[str]:
@@ -192,7 +201,7 @@ class WSDTaskEvaluatorBase(BaseEvaluatorByRaganato, metaclass=ABCMeta):
 
         """
         for inputs_for_predictor, inputs_for_evaluator in self.iter_records():
-            predictions = self.predict(inputs_for_predictor, **self._predict_kwargs)
+            predictions = self.predict(inputs_for_predictor, **self.predict_kwargs)
             ground_truthes = inputs_for_evaluator[self._ground_truth_lemma_keys_field_name]
             dict_metrics = self.compute_metrics(ground_truthes, predictions)
             yield inputs_for_predictor, inputs_for_evaluator, ground_truthes, predictions, dict_metrics
@@ -211,7 +220,7 @@ class WSDTaskEvaluatorBase(BaseEvaluatorByRaganato, metaclass=ABCMeta):
         dict_dict_results = defaultdict(lambda : defaultdict(list))
         dict_dict_results["ALL"] = []
 
-        self._predict_kwargs = kwargs
+        self.predict_kwargs = kwargs
         for _, inputs_for_evaluator, ground_truthes, predicitons, dict_metrics in self:
             # store metrics
             dict_dict_results["ALL"].append(dict_metrics)
