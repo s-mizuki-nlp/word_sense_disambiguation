@@ -105,6 +105,7 @@ class HierarchicalCodeEncoder(nn.Module):
                 context_sequence_lengths: Optional[torch.LongTensor] = None,
                 requires_grad: bool = True,
                 on_inference: bool = False,
+                apply_argmax_on_inference: bool = False,
                 **kwargs):
 
         with ExitStack() as context_stack:
@@ -148,7 +149,8 @@ class HierarchicalCodeEncoder(nn.Module):
                                                                    context_embeddings=context_embeddings,
                                                                    context_sequence_lengths=context_sequence_lengths,
                                                                    init_states=init_states,
-                                                                   on_inference=on_inference)
+                                                                   on_inference=on_inference,
+                                                                   apply_argmax_on_inference=apply_argmax_on_inference)
             else:
                 raise NotImplementedError("Not implemented yet.")
 

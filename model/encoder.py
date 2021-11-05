@@ -80,7 +80,6 @@ class LSTMEncoder(SimpleEncoder):
                  n_dim_hidden: Optional[int] = None,
                  n_dim_emb_code: Optional[int] = None,
                  teacher_forcing: bool = True,
-                 apply_argmax_on_inference: bool = False,
                  input_entity_vector: bool = False,
                  discretizer: Optional[nn.Module] = None,
                  global_attention_type: Optional[str] = None,
@@ -110,7 +109,6 @@ class LSTMEncoder(SimpleEncoder):
         self._n_ary_internal = None
         self._global_attention_type = global_attention_type
         self._teacher_forcing = teacher_forcing
-        self._apply_argmax_on_inference = apply_argmax_on_inference
         self._input_entity_vector = input_entity_vector
         self._code_embeddings_type = code_embeddings_type
         self._trainable_beginning_of_code = trainable_beginning_of_code
@@ -182,7 +180,9 @@ class LSTMEncoder(SimpleEncoder):
                 context_embeddings: Optional[torch.Tensor] = None,
                 context_sequence_lengths: Optional[torch.Tensor] = None,
                 init_states: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-                on_inference: bool = False, **kwargs):
+                on_inference: bool = False,
+                apply_argmax_on_inference: bool = False,
+                **kwargs):
         """
 
         @param entity_vectors: input embeddings. shape: (n_batch, n_dim_emb)
@@ -242,7 +242,7 @@ class LSTMEncoder(SimpleEncoder):
 
             # compute the relaxed code of current digit: c_d
             if on_inference:
-                if self._apply_argmax_on_inference:
+                if apply_argmax_on_inference:
                     t_latent_code_d = F.one_hot(t_prob_c_d.argmax(dim=-1), num_classes=self._n_ary).type(dtype)
                 else:
                     # empirically, embedding based on the probability produces better result then argmax.
