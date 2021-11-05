@@ -133,14 +133,16 @@ class FrequencyBasedMonosemousEntitySampler(object):
                  path_monosemous_words_freq: Optional[str] = None,
                  dataset_monosemous_entity_annotated_corpus: Optional[Dataset] = None,
                  lemma_lowercase: bool = True,
+                 enable_random_sampling: bool = True,
                  random_seed: int = 42
                  ):
         """
         単義語をsamplingする．指定頻度未満の単義語は削除，指定頻度以上の単義語はdown-samplingする．
 
         @param min_freq: 最小頻度．指定値未満の単義語は削除．
-        @param max_freq: 最大頻度．指定値を上回る単義語は，先頭max_freq個のみ採択，残りは削除．
+        @param max_freq: 最大頻度．指定値を上回る単義語は，先頭max_freq個のみ採択(enable_random_sampling=False) または 確率的に採択(enable_random_sampling=True)
         @param path_monosemous_words_freq: 単義語の頻度データ．フォーマットはNDJSON, `{'lemma': 'toddler', 'pos': 'n', 'freq': 2681}`
+        @param enable_random_sampling: True: 最大頻度を上回る単義語について確率的に採択． False: 先頭max_freq個のみ採択．
 
         @rtype: object
         """
@@ -162,10 +164,12 @@ class FrequencyBasedMonosemousEntitySampler(object):
         self._min_freq = 0 if min_freq is None else min_freq
         self._max_freq = float("inf") if max_freq is None else max_freq
         self._lemma_lowercase = lemma_lowercase
+        self._enable_random_sampling = enable_random_sampling
 
-        np.random.seed(random_seed)
-        self._cursor = -1
-        self._random_values = np.random.uniform(size=2 ** 24)
+        if enable_random_sampling:
+            np.random.seed(random_seed)
+            self._cursor = -1
+            self._random_values = np.random.uniform(size=2 ** 24)
 
         self.reset()
 
@@ -190,11 +194,14 @@ class FrequencyBasedMonosemousEntitySampler(object):
         return cnt
 
     def random_uniform(self) -> float:
-        self._cursor += 1
-        self._cursor %= self._random_values.size
-        return self._random_values[self._cursor]
+        if self._enable_random_sampling:
+            self._cursor += 1
+            self._cursor %= self._random_values.size
+            return self._random_values[self._cursor]
+        else:
+            return 0.0
 
-    def random_sampling(self, lemma_pos):
+    def decide_sample_or_not(self, lemma_pos):
         freq_total = self._lemma_pos_freq[lemma_pos]
         freq_sampled = self._lemma_pos_freq_sampled[lemma_pos]
         freq_missed = self._lemma_pos_freq_missed[lemma_pos]
@@ -222,7 +229,7 @@ class FrequencyBasedMonosemousEntitySampler(object):
         lst_ret = []
         for entity in lst_entities:
             lemma_pos = lemma_pos_to_tuple(lemma_lowercase=self._lemma_lowercase, **entity)
-            if not self.random_sampling(lemma_pos):
+            if not self.decide_sample_or_not(lemma_pos):
                 continue
             lst_ret.append(entity)
 
