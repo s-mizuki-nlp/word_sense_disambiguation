@@ -270,7 +270,10 @@ class SenseCodeTrainer(LightningModule):
 
         # forward computation without back-propagation
         t_target_codes = batch["ground_truth_synset_codes"]
+        # continuous relaxation of previous tokens
         t_codes, t_code_probs = self._model._predict(**batch)
+        # one-hot repr. of previous tokens
+        t_codes_greedy, t_code_probs_greedy = self._model._predict(**batch, apply_argmax_on_inference=True)
 
         if self._use_sampled_code_repr_for_loss_computation:
             code_repr = t_codes
@@ -287,8 +290,14 @@ class SenseCodeTrainer(LightningModule):
         }
 
         # analysis metrics
+        ## based on continuous relaxation
         metrics_repr = self.evaluate_metrics(target_codes=t_target_codes, predicted_code_probs=t_code_probs, predicted_codes=t_codes)
         metrics.update(metrics_repr)
+        ## based on one-hot representation (=greedy decoding)
+        metrics_repr_greedy = self.evaluate_metrics(target_codes=t_target_codes,
+                                                    predicted_code_probs=t_code_probs_greedy, predicted_codes=t_codes_greedy)
+        metrics["val_hard_cpl_greedy"] = metrics_repr_greedy["val_hard_cpl"]
+        metrics["val_soft_cpl_greedy"] = metrics_repr_greedy["val_soft_cpl"]
 
         self.log_dict(metrics)
 
