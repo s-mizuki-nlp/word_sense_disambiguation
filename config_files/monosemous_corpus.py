@@ -36,4 +36,10 @@ cfg_training = {
         "max_sequence_length": None,
         "description": "BERT-large-cased. Wiki40b trainset, freq=100~300, length=6~128."
     },
+    "wiki40b-all-ext": {
+        "path":os.path.join(DIR_TRAIN_UNSUPERVISED, "bert-large-cased_wiki40b-train-all-paragraph_freq=100-200_len=6-128_random=False.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "description": "BERT-large-cased. Wiki40b trainset, freq=100~200, length=6~128, disable random sampling."
+    },
 }
