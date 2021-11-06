@@ -97,6 +97,8 @@ class WSDTaskDataset(IterableDataset):
                     continue
 
                 obj_entity = {
+                    "lemma":lemma,
+                    "pos":pos,
                     "entity_embedding": lst_entity_embeddings[idx],
                     "entity_sequence_length": lst_entity_seq_len[idx],
                     "context_embedding": context_embedding,
@@ -237,12 +239,16 @@ class WSDTaskDatasetCollateFunction(object):
 
         set_field_names = next(iter(lst_entity_objects)).keys()
 
-        # context embeddings and entity embeddings
+        # token info, context embeddings and entity embeddings
+        lst_lemmas = _list_of("lemma")
+        lst_pos = _list_of("pos")
         lst_context_sequence_lengths = _list_of("context_sequence_length")
         lst_lagged_context_embeddings = _list_of("context_embedding")
         lst_entity_sequence_lengths = _list_of("entity_sequence_length")
         lst_lagged_entity_span_embeddings = _list_of("entity_embedding")
         dict_ret = {
+            "lemmas": lst_lemmas,
+            "pos": lst_pos,
             "context_sequence_lengths": torch.tensor(lst_context_sequence_lengths),
             "context_embeddings": utils.pad_and_stack_list_of_tensors(lst_lagged_context_embeddings),
             "entity_sequence_lengths": torch.tensor(lst_entity_sequence_lengths),
