@@ -60,14 +60,14 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
         # candidate_codes: (n_candidate, n_digits, n_ary)
 
         # entailment probability and synonym probability
-        t_prob_entail = self._aux_hyponymy_score.calc_ancestor_probability(t_prob_c_x=candidate_codes, t_prob_c_y=predicted_code_probs)
-        t_prob_synonym = self._aux_hyponymy_score.calc_synonym_probability(t_prob_c_x=candidate_codes, t_prob_c_y=predicted_code_probs)
+        t_log_prob_entail = self._aux_hyponymy_score.calc_log_ancestor_probability(t_prob_c_x=candidate_codes, t_prob_c_y=predicted_code_probs)
+        t_log_prob_synonym = self._aux_hyponymy_score.calc_log_synonym_probability(t_prob_c_x=candidate_codes, t_prob_c_y=predicted_code_probs)
         if add_entailment_probs:
-            t_prob_inclusion = t_prob_synonym + t_prob_entail
+            t_log_prob_inclusion = torch.log(torch.exp(t_log_prob_synonym) + torch.exp(t_log_prob_entail))
         else:
-            t_prob_inclusion = t_prob_synonym
+            t_log_prob_inclusion = t_log_prob_synonym
 
-        return t_prob_inclusion
+        return t_log_prob_inclusion
 
     def score_by_inference_metric(self, candidate_codes, predicted_code_prob: torch.Tensor) -> List[float]:
         # candidate_codes: (n_candidates, n_digits)
