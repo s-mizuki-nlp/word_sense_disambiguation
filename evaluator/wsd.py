@@ -63,7 +63,7 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
         t_log_prob_entail = self._aux_hyponymy_score.calc_log_ancestor_probability(t_prob_c_x=candidate_codes, t_prob_c_y=predicted_code_probs)
         t_log_prob_synonym = self._aux_hyponymy_score.calc_log_synonym_probability(t_prob_c_x=candidate_codes, t_prob_c_y=predicted_code_probs)
         if add_entailment_probs:
-            t_log_prob_inclusion = torch.log(torch.exp(t_log_prob_synonym) + torch.exp(t_log_prob_entail))
+            t_log_prob_inclusion = torch.log(torch.exp(t_log_prob_synonym) + torch.exp(t_log_prob_entail) + 1E-15)
         else:
             t_log_prob_inclusion = t_log_prob_synonym
 
