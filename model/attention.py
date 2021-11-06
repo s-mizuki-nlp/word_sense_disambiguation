@@ -12,7 +12,8 @@ from .utils import masked_average
 class EntityVectorEncoder(MultiheadAttention):
 
     def __init__(self, embed_dim, num_heads, q_input_feature: str = "entity", kv_input_feature: str = "context",
-                 dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None, batch_first: bool = True):
+                 dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None,
+                 batch_first: bool = True, average_pooling: bool = True):
         super().__init__(embed_dim, num_heads, dropout, bias, add_bias_kv, add_zero_attn, kdim, vdim)
 
         set_features = {"entity","context"}
@@ -24,6 +25,7 @@ class EntityVectorEncoder(MultiheadAttention):
         self._q_input_feature = q_input_feature
         self._kv_input_feature = kv_input_feature
         self._batch_first = batch_first
+        self._average_pooling = average_pooling
 
     def forward(self, entity_embeddings: torch.Tensor, context_embeddings: torch.Tensor,
                 entity_sequence_mask: torch.BoolTensor, context_sequence_mask: torch.BoolTensor) -> torch.Tensor:
@@ -69,7 +71,10 @@ class EntityVectorEncoder(MultiheadAttention):
             t_output = t_output.swapaxes(0,1)
 
         # 1D pooling
-        t_encoded = masked_average(embeddings=t_output, sequence_mask=t_q_padding_mask)
+        if self._average_pooling:
+            t_encoded = masked_average(embeddings=t_output, sequence_mask=t_q_padding_mask)
+        else:
+            t_encoded = t_output
 
         return t_encoded
 
