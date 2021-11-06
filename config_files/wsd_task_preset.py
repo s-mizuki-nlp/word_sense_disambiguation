@@ -69,6 +69,13 @@ try:
         **cfg_task_dataset["TrainOnMonosemousCorpus"]
     )
 
+    wsd_train_wiki40b_all_ext = CreateWSDTaskDataset(
+        cfg_bert_embeddings=monosemous_corpus.cfg_training["wiki40b-all-ext"],
+        cfg_lemmas=lexical_knowledge_datasets.cfg_lemma_datasets["WordNet-noun-verb-incl-instance"],
+        cfg_synsets=lexical_knowledge_datasets.cfg_synset_datasets["WordNet-noun-verb-incl-instance"],
+        **cfg_task_dataset["TrainOnMonosemousCorpus"]
+    )
+
     wsd_train_wiki40b_all_wide_vocab = CreateWSDTaskDataset(
         cfg_bert_embeddings=monosemous_corpus.cfg_training["wiki40b-all-wide-vocab"],
         cfg_lemmas=lexical_knowledge_datasets.cfg_lemma_datasets["WordNet-noun-verb-incl-instance"],
