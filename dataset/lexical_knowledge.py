@@ -41,6 +41,7 @@ class LemmaDataset(NDJSONDataset, Dataset):
 
         self._lexical_knowledge = self._setup_lexical_knowledge()
         self._lexical_knowledge_on_lemma_key = self._setup_lexical_knowledge_on_lemma_key()
+        self._lexical_knowledge_on_synset_id = self._setup_lexical_knowledge_on_synset_id()
 
     def _setup_wordnet(self):
         try:
@@ -64,6 +65,15 @@ class LemmaDataset(NDJSONDataset, Dataset):
             for lemma_key, synset_id in record["lemma_keys"].items():
                 result[lemma_key]["synset_id"] = synset_id
                 result[lemma_key]["lexname"] = dict_synset_id_to_lexname[synset_id]
+        return result
+
+    def _setup_lexical_knowledge_on_synset_id(self) -> Dict[str, Dict[str, List[str]]]:
+        result = defaultdict(lambda : defaultdict(list))
+        for record in self:
+            lemma = record["lemma"]
+            for lemma_key, synset_id in record["lemma_keys"].items():
+                result[synset_id]["lemmas"].append(lemma)
+                result[synset_id]["lemma_keys"].append(lemma_key)
         return result
 
     def __getitem__(self, lemma_pos: Tuple[str, str]):
@@ -93,6 +103,9 @@ class LemmaDataset(NDJSONDataset, Dataset):
             lemma_keys = [lemma_keys]
         lst_ret = list(map(self.get_lexname_from_lemma_key, lemma_keys))
         return lst_ret
+
+    def lookup_lemma_keys_from_synset_id(self, synset_id: str):
+        return self._lexical_knowledge_on_synset_id[synset_id]["lemma_keys"]
 
     def get_synset_codes(self, lemma: str, pos: str):
         record = self[(lemma, pos)]
@@ -172,7 +185,6 @@ class SynsetDataset(NDJSONDataset, Dataset):
                  transform_functions=None,
                  filter_function: Optional[Union[Callable, List[Callable]]] = None,
                  n_rows: Optional[int] = None,
-                 lookup_lemma_keys: bool = False,
                  description: str = "",
                  **kwargs_for_json_loads):
 
@@ -185,7 +197,6 @@ class SynsetDataset(NDJSONDataset, Dataset):
 
         super().__init__(path, binary, transform_functions, filter_function, n_rows, description, **kwargs_for_json_loads)
         self._lemma_lowercase = lemma_lowercase
-        self._lookup_lemma_keys = lookup_lemma_keys
 
         self._synsets = self._setup_lexical_knowledge()
 
@@ -205,8 +216,6 @@ class SynsetDataset(NDJSONDataset, Dataset):
     def _setup_lexical_knowledge(self) -> Dict[str, Any]:
         result = {}
         for record in self:
-            if self._lookup_lemma_keys:
-                record["lemma_keys"] = self.lookup_lemma_keys(record["id"])
 
             key_id = record["id"]
             key_code = self._synset_code_to_lookup_key(record["code"])
@@ -223,16 +232,6 @@ class SynsetDataset(NDJSONDataset, Dataset):
             return self._synsets[key]
         else:
             raise ValueError(f"unknown key type: {type(synset_id_or_synset_code)}")
-
-    def lookup_lemma_keys(self, synset_id: str):
-        try:
-            synset = wn.synset(synset_id)
-            lst_lemmas = synset.lemmas()
-            lst_ret = [lemma.key() for lemma in lst_lemmas]
-        except Exception as e:
-            warnings.warn(f"{e}")
-            lst_ret = []
-        return lst_ret
 
     def get_parent_synset(self, synset_id: str):
         parent_synset_id = self[synset_id]["parent_synset_id"]

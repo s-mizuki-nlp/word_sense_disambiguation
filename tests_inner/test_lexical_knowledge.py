@@ -44,14 +44,7 @@ class LemmaDatasetTestCases(unittest.TestCase):
                     actual = self._dataset.get_lexname_from_lemma_key(lemma_key)
                     self.assertEqual(expected, actual)
 
-
-class SynsetDatasetTestCases(unittest.TestCase):
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls._dataset = SynsetDataset(**cfg_synset_datasets["WordNet-noun-verb-incl-instance"])
-
-    def test_lemma_keys_lookup(self):
+    def test_lookup_lemma_keys_from_synset_id(self):
         lst_synset_ids = ["play.n.01", "earth.n.01", "play.v.01"]
 
         def _lookup_lemmas(synset_id: str):
@@ -60,10 +53,16 @@ class SynsetDatasetTestCases(unittest.TestCase):
         for synset_id in lst_synset_ids:
             with self.subTest(synset_id=synset_id):
                 expected = set(_lookup_lemmas(synset_id))
-                actual = set(self._dataset.lookup_lemma_keys(synset_id))
+                actual = set(self._dataset.lookup_lemma_keys_from_synset_id(synset_id))
                 self.assertSetEqual(expected, actual)
 
-    def test_code_lookup(self):
+class SynsetDatasetTestCases(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._dataset = SynsetDataset(**cfg_synset_datasets["WordNet-noun-verb-incl-instance"])
+
+    def test_lookup_sense_code(self):
         lst_synset_ids = ["play.n.01", "earth.n.01", "play.v.01"]
 
         for synset_id in lst_synset_ids:

@@ -59,28 +59,24 @@ cfg_synset_datasets = {
         "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "synset_taxonomy_pos-n+v_ary-64_incl-instance-of.jsonl"),
         "binary": False,
         "lemma_lowercase": True,
-        "lookup_lemma_keys": True,
         "description": "DEFAULT Dataset. WordNet(N+V), includes instance-of, N_ary = 64.",
     },
     "WordNet-noun-verb": {
         "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "synset_taxonomy_pos-n+v_ary-64.jsonl"),
         "binary": False,
         "lemma_lowercase": True,
-        "lookup_lemma_keys": True,
         "description": "WordNet(N+V), excludes instance-of, N_ary = 64.",
     },
     "WordNet-noun-verb-incl-instance-unlimited-ary": {
         "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "synset_taxonomy_pos-n+v_ary-None_incl-instance-of.jsonl"),
         "binary": False,
         "lemma_lowercase": True,
-        "lookup_lemma_keys": True,
         "description": "WordNet(N+V), includes instance-of, N_ary = unlimited.",
     },
     "WordNet-noun-verb-unlimited-ary": {
         "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "synset_taxonomy_pos-n+v_ary-None.jsonl"),
         "binary": False,
         "lemma_lowercase": True,
-        "lookup_lemma_keys": True,
         "description": "WordNet(N+V), excludes instance-of, N_ary = unlimited.",
     },
 }
