@@ -283,7 +283,9 @@ class WSDTaskDatasetCollateFunction(object):
         # other attributes are accumulated as `records` object.
         if self._return_records:
             trim_plural = lambda name: name[:-1] if name.endswith("s") else name
-            set_uncaught_fields = set_field_names - set([trim_plural(name) for name in dict_ret.keys()])
+            set_essential_fields = {"pos", "lemma"}
+            set_caught_fields = set([trim_plural(name) for name in dict_ret.keys()])
+            set_uncaught_fields = (set_field_names - set_caught_fields) | set_essential_fields
             lst_records = [{name:e_object.get(name, None) for name in set_uncaught_fields} for e_object in lst_entity_objects]
             dict_ret["records"] = lst_records
 
