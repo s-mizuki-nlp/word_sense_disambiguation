@@ -3,7 +3,8 @@
 
 from nltk.corpus import wordnet as wn
 
-from typing import Dict, Any, Iterable, List, Tuple
+from typing import Dict, Any, Iterable, List, Tuple, Union
+numeric = Union[int, float]
 from ._supervised_base import WSDTaskEvaluatorBase
 
 
@@ -41,28 +42,31 @@ class MostFrequentSenseWSDTaskEvaluator(WSDTaskEvaluatorBase):
         assert len(lst_lemmas) > 0, f"unknown lemma: {str_lemma}|{pos}"
         return lst_lemmas
 
-    def _print_verbose(self, lst_tup_lemma_and_score: List[Tuple[wn.lemma, float]]):
+    def _print_verbose(self, lst_tup_lemma_and_score: List[Tuple[wn.lemma, Union[numeric, Tuple[numeric]]]]):
         print(f"metric: WordNet sense frequency")
         for lemma, score in lst_tup_lemma_and_score:
             print(f"{lemma.key()}: {score:3d}")
 
-    def return_top_k_lemma_keys(self, lst_lemmas: List[wn.lemma], lst_scores: List[float], multiple_output: bool) -> List[str]:
-        lst_tup_lemma_and_score = list(zip(lst_lemmas, lst_scores))
-        lst_tup_lemma_and_score = sorted(lst_tup_lemma_and_score, key=lambda tup: tup[1], reverse=True)
+    def return_top_k_lemma_keys(self, lst_lemmas: List[wn.lemma], lst_scores: Union[List[numeric], Tuple[List[numeric]]],
+                                multiple_output: bool) -> List[str]:
+        if isinstance(lst_scores, tuple):
+            lst_scores = list(zip(*lst_scores))
+        lst_tup_lemma_and_scores = list(zip(lst_lemmas, lst_scores))
+        lst_tup_lemma_and_scores = sorted(lst_tup_lemma_and_scores, key=lambda tup: tup[1], reverse=True)
 
         if self.verbose:
-            self._print_verbose(lst_tup_lemma_and_score)
+            self._print_verbose(lst_tup_lemma_and_scores)
 
         if multiple_output:
-            lst_keys = []; prev_score = 0
-            for lemma, score in lst_tup_lemma_and_score:
-                if score < prev_score:
+            lst_keys = []; prev_scores = None
+            for lemma, scores in lst_tup_lemma_and_scores:
+                if (prev_scores is not None) and (scores < prev_scores):
                     break
                 lst_keys.append(lemma.key())
-                prev_score = lemma.count()
+                prev_scores = scores
             return lst_keys
         else:
-            lemma, score = lst_tup_lemma_and_score[0]
+            lemma, scores = lst_tup_lemma_and_scores[0]
             return [lemma.key()]
 
     def score_by_sense_frequency(self, lst_lemmas: List[wn.lemma], reorder_by_lemma_count: bool = False) -> List[float]:

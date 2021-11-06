@@ -8,7 +8,7 @@ from nltk.corpus import wordnet as wn
 from model.core import HierarchicalCodeEncoder
 from model.loss_supervised import HyponymyScoreLoss
 
-from .wsd_baseline import MostFrequentSenseWSDTaskEvaluator, WSDTaskEvaluatorBase
+from .wsd_baseline import MostFrequentSenseWSDTaskEvaluator, WSDTaskEvaluatorBase, numeric
 from dataset import WSDTaskDataset
 from dataset.lexical_knowledge import SynsetDataset
 from dataset.utils import tensor_to_numpy
@@ -109,6 +109,10 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
         @param apply_one_hot_encoding: convert from continuous relaxed repr. to one-hot repr.
         @return:
         """
+
+        # when ties happen, then we fall back to most frequent sense.
+        ties_fallback_to_mfs = (output_tie_lemma == False)
+
         lemma = input["lemma"]
         pos = input["pos"]
 
@@ -129,14 +133,24 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
         # t_candidate_codes: (n_candidates, n_digits, n_ary)
         t_candidate_codes = torch.LongTensor(lst_synset_codes, device=t_code_prob.device)
         # calc score for each candidate using specified inference metric.
-        lst_scores = self.score_by_inference_metric(candidate_codes=t_candidate_codes, predicted_code_prob=t_code_prob)
+        lst_metric_scores = self.score_by_inference_metric(candidate_codes=t_candidate_codes, predicted_code_prob=t_code_prob)
+
         # return top-k lemma keys
+        if ties_fallback_to_mfs:
+            lst_sense_freq_scores = self.score_by_sense_frequency(lst_lemmas=lst_candidate_lemmas, reorder_by_lemma_count=mfs_reorder_by_lemma_counts)
+            # order by metric first, then order by wordnet frequency rank.
+            lst_scores = (lst_metric_scores, lst_sense_freq_scores)
+        else:
+            lst_scores = lst_metric_scores
         return self.return_top_k_lemma_keys(lst_candidate_lemmas, lst_scores, multiple_output=output_tie_lemma)
 
-    def _print_verbose(self, lst_tup_lemma_and_score: List[Tuple[wn.lemma, float]]):
+    def _print_verbose(self, lst_tup_lemma_and_scores: List[Tuple[wn.lemma, Union[numeric, Tuple[numeric]]]]):
         print(f"metric: {self._inference_metric}")
-        for lemma, score in lst_tup_lemma_and_score:
+        for lemma, scores in lst_tup_lemma_and_scores:
             synset_id = lemma.synset().name()
             sense_code = self._lexical_knowledge_synset.get_synset_code(synset_id)
             str_sense_code = "-".join(map(str, sense_code))
-            print(f"{synset_id}-{lemma.key()}: {score:1.6f}, {str_sense_code}")
+            if isinstance(scores, float):
+                print(f"{synset_id}-{lemma.key()}: {scores:1.6f}, {str_sense_code}")
+            else:
+                print(f"{synset_id}-{lemma.key()}: {scores}, {str_sense_code}")
