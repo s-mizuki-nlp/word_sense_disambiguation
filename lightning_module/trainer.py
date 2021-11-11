@@ -141,6 +141,14 @@ class SenseCodeTrainer(LightningModule):
                 # d1bae73
                 if hasattr(model._encoder, "_apply_argmax_on_inference"):
                     delattr(model._encoder, "_apply_argmax_on_inference")
+                # 78e74aa
+                if not hasattr(model._encoder, "_pos_index"):
+                    p_emb_code = getattr(model._encoder, "_embedding_code_boc", None)
+                    if p_emb_code is not None:
+                        if p_emb_code.ndim == 1:
+                            p_emb_code_ = torch.nn.Parameter(data=p_emb_code.unsqueeze(0), requires_grad=True)
+                            setattr(model._encoder, "_pos_index", {"n":0, "v":0})
+                            setattr(model._encoder, "_embedding_code_boc", p_emb_code_)
             elif model._encoder.__class__.__name__ == "TransformerEncoder":
                 pass
             else:
