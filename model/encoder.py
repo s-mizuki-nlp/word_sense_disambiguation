@@ -168,6 +168,9 @@ class LSTMEncoder(BaseEncoder):
         @param on_inference: inference(True) or training(False)
         @return: tuple of (sampled codes, code probabilities). shape: (n_batch, n_digits, n_ary)
         """
+        if isinstance(pos, str):
+            pos = [pos]
+
         if entity_vectors is not None:
             t = entity_vectors
         elif init_states is not None:
@@ -377,18 +380,22 @@ class TransformerEncoder(BaseEncoder):
         # logits layer
         self._softmax_logit_layer = nn.Linear(in_features=self._n_dim_emb, out_features=self._n_ary, bias=True)
 
-    def create_sequence_inputs(self, ground_truth_synset_codes: torch.Tensor, lst_pos: List[str], dtype, device):
+    def create_sequence_inputs(self, lst_pos: List[str], device,
+                               ground_truth_synset_codes: Optional[Union[List[List[int]], torch.Tensor]] = None) -> torch.Tensor:
+        # 1. prepend PoS index
         # t_boc: (n_batch, 1)
+        lst_pos_idx = [self._pos_index[pos] for pos in lst_pos]
         t_boc = torch.LongTensor(lst_pos_idx, device=device).unsqueeze(dim=-1)
 
-        n_batch, n_digits = ground_truth_synset_codes.shape
-        dtype, device = self._dtype_and_device(ground_truth_synset_codes)
+        if ground_truth_synset_codes is None:
+            return t_boc
 
-        # prepend PoS index, trim tail digit.
-        lst_pos_idx = [self._pos_index[pos] for pos in lst_pos]
-
-        # t_inputs: (n_batch, n_digits)
-        t_inputs = torch.cat((t_boc, ground_truth_synset_codes[:,:n_digits-1]))
+        # 2. concat with one-shifted ground-truth codes.
+        if isinstance(ground_truth_synset_codes, list):
+            ground_truth_synset_codes = torch.LongTensor(ground_truth_synset_codes, device=device)
+        # input sequence length must be less or equal to n_digits.
+        # t_inputs: (n_batch, <n_digits)
+        t_inputs = torch.cat((t_boc, ground_truth_synset_codes[:,:self._n_digits-1]))
         return t_inputs
 
     def subsequent_mask(self, n_seq_length: int):
@@ -461,8 +468,8 @@ class TransformerEncoder(BaseEncoder):
                          ground_truth_synset_codes: torch.Tensor,
                          **kwargs):
         dtype, device = self._dtype_and_device(entity_embeddings)
-        input_sequence = self.create_sequence_inputs(ground_truth_synset_codes=ground_truth_synset_codes, lst_pos=pos,
-                                                     dtype=dtype, device=device)
+        input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device,
+                                                     ground_truth_synset_codes=ground_truth_synset_codes)
         return self.forward_base(input_sequence, entity_embeddings, entity_sequence_mask, **kwargs)
 
     def forward(self, pos: List[str], entity_embeddings: torch.Tensor,
