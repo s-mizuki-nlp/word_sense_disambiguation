@@ -378,7 +378,7 @@ class TransformerEncoder(BaseEncoder):
         self._decoder = nn.TransformerDecoder(layer, num_layers=self._n_layer)
 
         # logits layer
-        self._softmax_logit_layer = nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary, bias=True)
+        self._softmax_logit_layer = nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary, bias=False)
 
     def create_sequence_inputs(self, lst_pos: List[str], device,
                                ground_truth_synset_codes: Optional[Union[List[List[int]], torch.Tensor]] = None) -> torch.Tensor:
@@ -391,11 +391,12 @@ class TransformerEncoder(BaseEncoder):
             return t_boc
 
         # 2. concat with one-shifted ground-truth codes.
+        # ground_truth_synset_codes: (n_batch, <=n_digits)
         if isinstance(ground_truth_synset_codes, list):
             ground_truth_synset_codes = torch.LongTensor(ground_truth_synset_codes, device=device)
         # input sequence length must be less or equal to n_digits.
         # t_inputs: (n_batch, <n_digits)
-        t_inputs = torch.cat((t_boc, ground_truth_synset_codes[:,:self._n_digits-1]))
+        t_inputs = torch.cat((t_boc, ground_truth_synset_codes[:,:self._n_digits-1]), dim=-1)
         return t_inputs
 
     def subsequent_mask(self, n_seq_length: int):
@@ -410,17 +411,21 @@ class TransformerEncoder(BaseEncoder):
                      **kwargs):
         """
 
-        @param input_sequence: (n_batch, n_digits). sequence of the input codes.
+        @param input_sequence: (n_batch, <=n_digits). sequence of the input codes.
         @param entity_embeddings: (n_batch, max(entity_span), n_emb). stack of the subword embeddings within entity span.
         @param entity_sequence_mask: (n_batch, max(entity_span)). mask of the entity embeddings.
         @param kwargs:
         @return:
         """
 
+        n_digits = min(self._n_digits, input_sequence.shape[-1])
         # compute target embeddings: (n_batch, n_digits, n_dim_emb)
         tgt = self._pe_layer.forward( self._emb_layer.forward(input_sequence) )
         # prepare subsequent masks: (n_digits, n_digits)
-        tgt_mask = self.subsequent_mask(n_seq_length=self._n_digits)
+        if on_inference:
+            tgt_mask = None
+        else:
+            tgt_mask = self.subsequent_mask(n_seq_length=n_digits)
 
         # prepare memory embeddings and masks
         memory = entity_embeddings
@@ -437,11 +442,11 @@ class TransformerEncoder(BaseEncoder):
 
         # compute Pr{Y_d|y_{<d}}
         # lst_code_probs: List[tensor(n_batch, n_ary)]
-        lst_code_probs = [F.softmax(self._softmax_logit_layer(h_out[:, idx_d, :]), dim=-1) for idx_d in range(self._n_digits)]
+        lst_code_probs = [F.softmax(self._softmax_logit_layer(h_out[:, idx_d, :]), dim=-1) for idx_d in range(n_digits)]
 
         # adjust Pr{c_d=d|c_{<d}} so that Pr{c_d=0|c_{<d+1}} satisfies monotone increasing condition.
         if self._prob_zero_monotone_increasing:
-            for d in range(self._n_digits):
+            for d in range(n_digits):
                 prob_c_prev = lst_code_probs[d-1] if d > 0 else None
                 t_prob_c_d = lst_code_probs[d]
                 lst_code_probs[d] = self._adjust_code_probability_to_monotone_increasing(probs=t_prob_c_d, probs_prev=prob_c_prev)
@@ -468,7 +473,6 @@ class TransformerEncoder(BaseEncoder):
 
         dtype, device = self._dtype_and_device(entity_embeddings)
 
-        t_codes = None; t_code_probs = None
         for digit in range(self._n_digits):
             if digit == 0:
                 input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=None)
@@ -484,14 +488,14 @@ class TransformerEncoder(BaseEncoder):
             # t_code_probs_d: (n_batch, 1, n_ary)
             t_code_probs_d = t_code_probs_upto_d[:, digit, :].unsqueeze(1)
             # t_codes_d: (n_batch, 1)
-            t_codes_d = t_code_probs_d.argmax()
+            t_codes_d = t_code_probs_d.argmax(dim=-1)
 
             # concat with previous sequences
             if digit == 0:
                 t_codes, t_code_probs = t_codes_d, t_code_probs_d
             else:
                 t_codes = torch.cat([t_codes, t_codes_d], dim=-1)
-                t_code_probs = torch.cat([t_code_probs, t_code_probs_d], dim=-1)
+                t_code_probs = torch.cat([t_code_probs, t_code_probs_d], dim=1)
 
         return t_codes, t_code_probs
 
@@ -513,11 +517,15 @@ class TransformerEncoder(BaseEncoder):
                 ground_truth_synset_codes: Optional[torch.Tensor] = None,
                 on_inference: bool = False,
                 **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
+        if isinstance(pos, str):
+            pos = [pos]
 
         if not on_inference:
-            return self.forward_training(pos, entity_embeddings, entity_sequence_mask, ground_truth_synset_codes)
+            return self.forward_training(pos=pos, entity_embeddings=entity_embeddings,
+                                         entity_sequence_mask=entity_sequence_mask, ground_truth_synset_codes=ground_truth_synset_codes)
         else:
-            return self.forward_inference_greedy(pos, entity_embeddings, entity_sequence_mask, **kwargs)
+            return self.forward_inference_greedy(pos=pos, entity_embeddings=entity_embeddings,
+                                                 entity_sequence_mask=entity_sequence_mask, **kwargs)
 
     @property
     def has_discretizer(self):
