@@ -51,6 +51,7 @@ class BaseEncoder(nn.Module):
 class LSTMEncoder(BaseEncoder):
 
     def __init__(self, n_dim_emb: int, n_digits: int, n_ary: int,
+                 pos_tagset: Iterable[str],
                  n_dim_hidden: Optional[int] = None,
                  n_dim_emb_code: Optional[int] = None,
                  teacher_forcing: bool = True,
@@ -58,11 +59,10 @@ class LSTMEncoder(BaseEncoder):
                  discretizer: Optional[nn.Module] = None,
                  global_attention_type: Optional[str] = None,
                  code_embeddings_type: str = "time_distributed",
-                 trainable_beginning_of_code: bool = True,
                  prob_zero_monotone_increasing: bool = False,
                  **kwargs):
 
-        super(BaseEncoder, self).__init__()
+        super().__init__(n_ary=n_ary)
 
         if teacher_forcing:
             if discretizer is not None:
@@ -77,13 +77,14 @@ class LSTMEncoder(BaseEncoder):
         self._n_dim_emb_code = n_dim_emb if n_dim_emb_code is None else n_dim_emb_code
         self._n_dim_hidden = n_dim_emb if n_dim_hidden is None else n_dim_hidden
         self._n_digits = n_digits
-        self._n_ary = n_ary
+        # self._n_ary = n_ary
+        self._pos_tagset = sorted(list(pos_tagset))
         self._n_ary_internal = None
         self._global_attention_type = global_attention_type
         self._teacher_forcing = teacher_forcing
         self._input_entity_vector = input_entity_vector
         self._code_embeddings_type = code_embeddings_type
-        self._trainable_beginning_of_code = trainable_beginning_of_code
+        self._trainable_beginning_of_code = True
         self._prob_zero_monotone_increasing = prob_zero_monotone_increasing
 
         if self._input_entity_vector == False:
@@ -93,6 +94,11 @@ class LSTMEncoder(BaseEncoder):
 
     def _build(self):
 
+        # assign part-of-speech index
+        self._pos_index = {}
+        for idx, pos in enumerate(self._pos_tagset):
+            self._pos_index[pos] = idx
+
         # ([x;e_t],h_t) or (e_t,h_t) -> h_t
         if self._input_entity_vector:
             input_size = self._n_dim_emb + self._n_dim_emb_code
@@ -101,9 +107,9 @@ class LSTMEncoder(BaseEncoder):
         self._lstm_cell = nn.LSTMCell(input_size=input_size, hidden_size=self._n_dim_hidden, bias=True)
 
         # y_t -> e_{t+1}; t=0,1,...,N_d-2
-        ## embedding for beginning-of-code
+        ## embedding for beginning-of-code: (n_pos, n_dim_emb_code)
         if self._trainable_beginning_of_code:
-            init_value = torch.full((self._n_dim_emb_code,), dtype=torch.float, fill_value=0.01)
+            init_value = torch.full((len(self._pos_index), self._n_dim_emb_code), dtype=torch.float, fill_value=0.01)
             self._embedding_code_boc = nn.Parameter(init_value, requires_grad=True)
         ## embeddings for specific values
         if self._code_embeddings_type == "time_distributed": # e_t = Embed(o_t;\theta)
@@ -133,18 +139,19 @@ class LSTMEncoder(BaseEncoder):
         else: # z_t = FF(h_t;\theta_t)
             self._h_to_z = nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary, bias=True)
 
-    def _init_states(self, n_batch: int, dtype, device):
+    def _init_states(self, n_batch: int, lst_pos: List[str], dtype, device):
         h_0 = torch.zeros((n_batch, self._n_dim_hidden), dtype=dtype, device=device)
         c_0 = torch.zeros((n_batch, self._n_dim_hidden), dtype=dtype, device=device)
 
         if self._trainable_beginning_of_code:
-            e_0 = torch.tile(self._embedding_code_boc, (n_batch, 1) ).to(device)
+            lst_embeddings = [self._embedding_code_boc[self._pos_index[pos],:] for pos in lst_pos]
+            e_0 = torch.stack(lst_embeddings, dim=0).to(device)
         else:
             e_0 = torch.zeros((n_batch, self._n_dim_emb_code), dtype=dtype, device=device)
 
         return h_0, c_0, e_0
 
-    def forward(self, entity_vectors: Optional[torch.Tensor] = None,
+    def forward(self, pos: List[str], entity_vectors: Optional[torch.Tensor] = None,
                 ground_truth_synset_codes: Optional[torch.Tensor] = None,
                 context_embeddings: Optional[torch.Tensor] = None,
                 context_sequence_lengths: Optional[torch.Tensor] = None,
@@ -153,7 +160,7 @@ class LSTMEncoder(BaseEncoder):
                 apply_argmax_on_inference: bool = False,
                 **kwargs):
         """
-
+        @param pos: list of part-of-speech tags. i.e., ["n","n","v",...,"n"]
         @param entity_vectors: input embeddings. shape: (n_batch, n_dim_emb)
         @param ground_truth_synset_codes: ground-truth codes. shape: (n_batch, n_digits)
         @param init_states: input state vectors. tuple of (h_0,c_0) tensors. shape: (n_batch, n_dim_hidden)
@@ -178,7 +185,7 @@ class LSTMEncoder(BaseEncoder):
         # initialize variables
         lst_prob_c = []
         lst_latent_code = []
-        h_d, c_d, e_d = self._init_states(n_batch, dtype, device)
+        h_d, c_d, e_d = self._init_states(n_batch, pos, dtype, device)
         if init_states is not None:
             h_d, c_d = init_states[0], init_states[1]
 
@@ -314,12 +321,12 @@ class TransformerEncoder(BaseEncoder):
                  prob_zero_monotone_increasing: bool = False,
                  **kwargs):
 
-        super().__init__()
+        super().__init__(n_ary=n_ary)
 
         self._n_dim_emb = n_dim_emb
         self._n_digits = n_digits
-        self._n_ary = n_ary
-        self._pos_tagset = set(pos_tagset)
+        # self._n_ary = n_ary
+        self._pos_tagset = sorted(list(pos_tagset))
         self._discretizer = discretizer
         self._n_layer = n_layer
         self._n_head = n_head
@@ -370,14 +377,16 @@ class TransformerEncoder(BaseEncoder):
         # logits layer
         self._softmax_logit_layer = nn.Linear(in_features=self._n_dim_emb, out_features=self._n_ary, bias=True)
 
-    def create_teacher_forcing_inputs(self, ground_truth_synset_codes: torch.Tensor, lst_pos: List[str]):
+    def create_sequence_inputs(self, ground_truth_synset_codes: torch.Tensor, lst_pos: List[str], dtype, device):
+        # t_boc: (n_batch, 1)
+        t_boc = torch.LongTensor(lst_pos_idx, device=device).unsqueeze(dim=-1)
+
         n_batch, n_digits = ground_truth_synset_codes.shape
         dtype, device = self._dtype_and_device(ground_truth_synset_codes)
 
         # prepend PoS index, trim tail digit.
         lst_pos_idx = [self._pos_index[pos] for pos in lst_pos]
-        # t_boc: (n_batch, 1)
-        t_boc = torch.LongTensor(lst_pos_idx, device=device).unsqueeze(dim=-1)
+
         # t_inputs: (n_batch, n_digits)
         t_inputs = torch.cat((t_boc, ground_truth_synset_codes[:,:n_digits-1]))
         return t_inputs
@@ -388,15 +397,20 @@ class TransformerEncoder(BaseEncoder):
         subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
         return torch.from_numpy(subsequent_mask) == 1
 
-    def forward_training(self, pos: List[str], entity_embeddings: torch.Tensor,
-                entity_sequence_mask: torch.Tensor,
-                ground_truth_synset_codes: Optional[torch.Tensor] = None,
-                **kwargs):
-        # crate inputs
-        t_inputs = self.create_teacher_forcing_inputs(ground_truth_synset_codes, pos)
+    def forward_base(self, input_sequence: torch.Tensor, entity_embeddings: torch.Tensor,
+                     entity_sequence_mask: torch.Tensor,
+                     **kwargs):
+        """
+
+        @param input_sequence: (n_batch, n_digits). sequence of the input codes.
+        @param entity_embeddings: (n_batch, max(entity_span), n_emb). stack of the subword embeddings within entity span.
+        @param entity_sequence_mask: (n_batch, max(entity_span)). mask of the entity embeddings.
+        @param kwargs:
+        @return:
+        """
 
         # compute target embeddings: (n_batch, n_digits, n_dim_emb)
-        tgt = self._pe_layer.forward( self._emb_layer.forward(t_inputs) )
+        tgt = self._pe_layer.forward( self._emb_layer.forward(input_sequence) )
         # prepare subsequent masks: (n_digits, n_digits)
         tgt_mask = self.subsequent_mask(n_seq_length=self._n_digits)
 
@@ -438,21 +452,29 @@ class TransformerEncoder(BaseEncoder):
 
     def forward_inference_greedy(self, pos: List[str], entity_embeddings: torch.Tensor,
                                  entity_sequence_mask: torch.Tensor,
-                                 apply_argmax_on_inference: bool,
                                  **kwargs):
         return None, None
+
+    def forward_training(self, pos: List[str],
+                         entity_embeddings: torch.Tensor,
+                         entity_sequence_mask: torch.Tensor,
+                         ground_truth_synset_codes: torch.Tensor,
+                         **kwargs):
+        dtype, device = self._dtype_and_device(entity_embeddings)
+        input_sequence = self.create_sequence_inputs(ground_truth_synset_codes=ground_truth_synset_codes, lst_pos=pos,
+                                                     dtype=dtype, device=device)
+        return self.forward_base(input_sequence, entity_embeddings, entity_sequence_mask, **kwargs)
 
     def forward(self, pos: List[str], entity_embeddings: torch.Tensor,
                 entity_sequence_mask: torch.Tensor,
                 ground_truth_synset_codes: Optional[torch.Tensor] = None,
                 on_inference: bool = False,
-                apply_argmax_on_inference: bool = False,
                 **kwargs):
 
         if not on_inference:
-            return self.forward_training(pos, entity_embeddings, entity_sequence_mask, ground_truth_synset_codes, **kwargs)
+            return self.forward_training(pos, entity_embeddings, entity_sequence_mask, ground_truth_synset_codes)
         else:
-            return self.forward_inference_greedy(pos, entity_embeddings, entity_sequence_mask, apply_argmax_on_inference, **kwargs)
+            return self.forward_inference_greedy(pos, entity_embeddings, entity_sequence_mask, **kwargs)
 
     @property
     def has_discretizer(self):

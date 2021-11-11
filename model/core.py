@@ -97,7 +97,8 @@ class HierarchicalCodeEncoder(nn.Module):
 
         return ret
 
-    def forward_by_lstm_encoder(self, entity_span_avg_vectors: Optional[torch.Tensor] = None,
+    def forward_by_lstm_encoder(self, pos: Optional[List[str]] = None,
+                                entity_span_avg_vectors: Optional[torch.Tensor] = None,
                                 ground_truth_synset_codes: Optional[torch.Tensor] = None,
                                 entity_embeddings: Optional[torch.Tensor] = None,
                                 entity_sequence_mask: Optional[torch.BoolTensor] = None,
@@ -138,7 +139,8 @@ class HierarchicalCodeEncoder(nn.Module):
             ground_truth_synset_codes = None
 
         # encoder and discretizer
-        t_latent_code, t_code_prob = self._encoder.forward(entity_vectors=entity_vectors,
+        t_latent_code, t_code_prob = self._encoder.forward(pos=pos,
+                                                           entity_vectors=entity_vectors,
                                                            ground_truth_synset_codes=ground_truth_synset_codes,
                                                            context_embeddings=context_embeddings,
                                                            context_sequence_lengths=context_sequence_lengths,
@@ -147,19 +149,21 @@ class HierarchicalCodeEncoder(nn.Module):
                                                            apply_argmax_on_inference=apply_argmax_on_inference)
         return t_latent_code, t_code_prob
 
-    def forward_by_transformer_encoder(self, entity_span_avg_vectors: Optional[torch.Tensor] = None,
-                                ground_truth_synset_codes: Optional[torch.Tensor] = None,
-                                entity_embeddings: Optional[torch.Tensor] = None,
-                                entity_sequence_mask: Optional[torch.BoolTensor] = None,
-                                context_embeddings: Optional[torch.Tensor] = None,
-                                context_sequence_mask: Optional[torch.BoolTensor] = None,
-                                context_sequence_lengths: Optional[torch.LongTensor] = None,
-                                on_inference: bool = False,
-                                apply_argmax_on_inference: bool = False,
-                                **kwargs):
+    def forward_by_transformer_encoder(self, pos: Optional[List[str]] = None,
+                                       entity_span_avg_vectors: Optional[torch.Tensor] = None,
+                                       ground_truth_synset_codes: Optional[torch.Tensor] = None,
+                                       entity_embeddings: Optional[torch.Tensor] = None,
+                                       entity_sequence_mask: Optional[torch.BoolTensor] = None,
+                                       context_embeddings: Optional[torch.Tensor] = None,
+                                       context_sequence_mask: Optional[torch.BoolTensor] = None,
+                                       context_sequence_lengths: Optional[torch.LongTensor] = None,
+                                       on_inference: bool = False,
+                                       apply_argmax_on_inference: bool = False,
+                                       **kwargs):
         return None, None
 
-    def forward(self, entity_span_avg_vectors: Optional[torch.Tensor] = None,
+    def forward(self, pos: Optional[List[str]] = None,
+                entity_span_avg_vectors: Optional[torch.Tensor] = None,
                 ground_truth_synset_codes: Optional[torch.Tensor] = None,
                 entity_embeddings: Optional[torch.Tensor] = None,
                 entity_sequence_mask: Optional[torch.BoolTensor] = None,
@@ -177,7 +181,8 @@ class HierarchicalCodeEncoder(nn.Module):
                 context_stack.enter_context(torch.no_grad())
 
             if self._encoder_class_name == "LSTMEncoder":
-                t_latent_code, t_code_prob = self.forward_by_lstm_encoder(entity_span_avg_vectors,
+                t_latent_code, t_code_prob = self.forward_by_lstm_encoder(pos,
+                                                                          entity_span_avg_vectors,
                                                                           ground_truth_synset_codes,
                                                                           entity_embeddings,
                                                                           entity_sequence_mask,
@@ -188,7 +193,8 @@ class HierarchicalCodeEncoder(nn.Module):
                                                                           apply_argmax_on_inference,
                                                                           **kwargs)
             elif self._encoder_class_name == "TransformerEncoder":
-                t_latent_code, t_code_prob = self.forward_by_transformer_encoder(entity_span_avg_vectors,
+                t_latent_code, t_code_prob = self.forward_by_transformer_encoder(pos,
+                                                                          entity_span_avg_vectors,
                                                                           ground_truth_synset_codes,
                                                                           entity_embeddings,
                                                                           entity_sequence_mask,
