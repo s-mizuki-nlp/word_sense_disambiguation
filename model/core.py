@@ -149,18 +149,24 @@ class HierarchicalCodeEncoder(nn.Module):
                                                            apply_argmax_on_inference=apply_argmax_on_inference)
         return t_latent_code, t_code_prob
 
-    def forward_by_transformer_encoder(self, pos: Optional[List[str]] = None,
-                                       entity_span_avg_vectors: Optional[torch.Tensor] = None,
-                                       ground_truth_synset_codes: Optional[torch.Tensor] = None,
-                                       entity_embeddings: Optional[torch.Tensor] = None,
-                                       entity_sequence_mask: Optional[torch.BoolTensor] = None,
-                                       context_embeddings: Optional[torch.Tensor] = None,
-                                       context_sequence_mask: Optional[torch.BoolTensor] = None,
-                                       context_sequence_lengths: Optional[torch.LongTensor] = None,
-                                       on_inference: bool = False,
-                                       apply_argmax_on_inference: bool = False,
-                                       **kwargs):
-        return None, None
+    def forward_by_tf_encoder(self, pos: Optional[List[str]] = None,
+                              ground_truth_synset_codes: Optional[torch.Tensor] = None,
+                              entity_embeddings: Optional[torch.Tensor] = None,
+                              entity_sequence_mask: Optional[torch.BoolTensor] = None,
+                              on_inference: bool = False,
+                              **kwargs):
+        # ground truth codes
+        if on_inference:
+            ground_truth_synset_codes = None
+
+        t_latent_code, t_code_prob = self._encoder.forward(pos=pos,
+                                                           entity_embeddings=entity_embeddings,
+                                                           entity_sequence_mask=entity_sequence_mask,
+                                                           ground_truth_synset_codes=ground_truth_synset_codes,
+                                                           on_inference=on_inference,
+                                                           **kwargs)
+
+        return t_latent_code, t_code_prob
 
     def forward(self, pos: Optional[List[str]] = None,
                 entity_span_avg_vectors: Optional[torch.Tensor] = None,
@@ -181,29 +187,24 @@ class HierarchicalCodeEncoder(nn.Module):
                 context_stack.enter_context(torch.no_grad())
 
             if self._encoder_class_name == "LSTMEncoder":
-                t_latent_code, t_code_prob = self.forward_by_lstm_encoder(pos,
-                                                                          entity_span_avg_vectors,
-                                                                          ground_truth_synset_codes,
-                                                                          entity_embeddings,
-                                                                          entity_sequence_mask,
-                                                                          context_embeddings,
-                                                                          context_sequence_mask,
-                                                                          context_sequence_lengths,
-                                                                          on_inference,
-                                                                          apply_argmax_on_inference,
+                t_latent_code, t_code_prob = self.forward_by_lstm_encoder(pos=pos,
+                                                                          entity_span_avg_vectors=entity_span_avg_vectors,
+                                                                          ground_truth_synset_codes=ground_truth_synset_codes,
+                                                                          entity_embeddings=entity_embeddings,
+                                                                          entity_sequence_mask=entity_sequence_mask,
+                                                                          context_embeddings=context_embeddings,
+                                                                          context_sequence_mask=context_sequence_mask,
+                                                                          context_sequence_lengths=context_sequence_lengths,
+                                                                          on_inference=on_inference,
+                                                                          apply_argmax_on_inference=apply_argmax_on_inference,
                                                                           **kwargs)
             elif self._encoder_class_name == "TransformerEncoder":
-                t_latent_code, t_code_prob = self.forward_by_transformer_encoder(pos,
-                                                                          entity_span_avg_vectors,
-                                                                          ground_truth_synset_codes,
-                                                                          entity_embeddings,
-                                                                          entity_sequence_mask,
-                                                                          context_embeddings,
-                                                                          context_sequence_mask,
-                                                                          context_sequence_lengths,
-                                                                          on_inference,
-                                                                          apply_argmax_on_inference,
-                                                                          **kwargs)
+                t_latent_code, t_code_prob = self.forward_by_tf_encoder(pos=pos,
+                                                                        entity_embeddings=entity_embeddings,
+                                                                        entity_sequence_mask=entity_sequence_mask,
+                                                                        ground_truth_synset_codes=ground_truth_synset_codes,
+                                                                        on_inference=on_inference,
+                                                                        **kwargs)
             else:
                 raise NotImplementedError(f"unknown encoder module: {self._encoder_class_name}")
 
