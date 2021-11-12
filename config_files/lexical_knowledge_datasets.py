@@ -28,7 +28,7 @@ cfg_lemma_datasets = {
         "transform_functions": {"synset_codes": top_digits_remover},
         "binary": False,
         "lemma_lowercase": True,
-        "description": "DEFAULT Dataset. WordNet(N+V), includes instance-of, N_ary = 64, Trim most significant (=top) digit and removed root entity (i.e. entity.n.01)",
+        "description": "DEFAULT Dataset. WordNet(N+V), includes instance-of, N_ary = 64, Trim most significant (=top) digit.",
     },
     "WordNet-noun-verb-incl-instance-monosemous": {
         "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "lemma_dictionary_pos-n+v_ary-64_incl-instance-of.jsonl"),
