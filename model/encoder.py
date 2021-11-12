@@ -314,10 +314,11 @@ class LSTMEncoder(BaseEncoder):
 class TransformerEncoder(BaseEncoder):
 
     def __init__(self, n_dim_emb: int, n_digits: int, n_ary: int,
-                 n_layer: int, n_head: int,
+                 num_encoder_layers: int,
+                 num_decoder_layers: int,
+                 n_head: int,
                  pos_tagset: Iterable[str],
                  layer_normalization: bool = False,
-                 discretizer: Optional[nn.Module] = None,
                  norm_digit_embeddings: bool = False,
                  ignore_trailing_zero_digits: bool = False,
                  trainable_positional_encoding: bool = False,
@@ -332,8 +333,8 @@ class TransformerEncoder(BaseEncoder):
         self._n_digits = n_digits
         # self._n_ary = n_ary
         self._pos_tagset = sorted(list(pos_tagset))
-        self._discretizer = discretizer
-        self._n_layer = n_layer
+        self._num_encoder_layers = num_encoder_layers
+        self._num_decoder_layers = num_decoder_layers
         self._n_head = n_head
         self._layer_normalization = layer_normalization
         self._dropout = dropout
@@ -370,20 +371,33 @@ class TransformerEncoder(BaseEncoder):
         }
         self._pe_layer = PositionalEncoding(**cfg_pe_layer)
 
-        # transformer decoder
+        if self._layer_normalization:
+            norm = nn.LayerNorm(normalized_shape=self._n_dim_hidden)
+        else:
+            norm = None
+
+        # entity token embeddings encoder
+        if self._num_encoder_layers > 0:
+            cfg_transformer_encoder_layer = {
+                "d_model":self._n_dim_hidden,
+                "nhead":self._n_head,
+                "dim_feedforward": self._n_dim_hidden * 4,
+                "dropout":self._dropout
+            }
+            encoder_layer = nn.TransformerEncoderLayer(**cfg_transformer_encoder_layer)
+            self._memory_encoder = nn.TransformerEncoder(encoder_layer, num_layers=self._num_encoder_layers, norm=norm)
+        else:
+            self._memory_encoder = None
+
+        # sense code decoder
         cfg_transformer_decoder_layer = {
             "d_model":self._n_dim_hidden,
             "nhead":self._n_head,
             "dim_feedforward": self._n_dim_hidden * 4,
             "dropout":self._dropout
         }
-        layer = nn.TransformerDecoderLayer(**cfg_transformer_decoder_layer)
-
-        if self._layer_normalization:
-            norm = nn.LayerNorm(normalized_shape=self._n_dim_hidden)
-        else:
-            norm = None
-        self._decoder = nn.TransformerDecoder(layer, num_layers=self._n_layer, norm=norm)
+        decoder_layer = nn.TransformerDecoderLayer(**cfg_transformer_decoder_layer)
+        self._decoder = nn.TransformerDecoder(decoder_layer, num_layers=self._num_decoder_layers, norm=norm)
 
         # logits layer
         self._softmax_logit_layer = nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary, bias=True)
@@ -423,6 +437,20 @@ class TransformerEncoder(BaseEncoder):
         """
         return torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
 
+    def forward_base_memory_encoder(self, entity_embeddings: torch.Tensor, entity_sequence_mask: torch.Tensor, **kwargs):
+        # prepare memory embeddings
+        if self.has_memory_encoder:
+            src = entity_embeddings
+            if self._batch_first:
+                src = src.swapaxes(0, 1)
+            src_key_padding_mask = entity_sequence_mask
+            memory = self._memory_encoder.forward(src=src, src_key_padding_mask=src_key_padding_mask)
+            if self._batch_first:
+                memory = memory.swapaxes(0, 1)
+        else:
+            memory = entity_embeddings
+
+        return memory
 
     def forward_base(self, input_sequence: torch.Tensor, entity_embeddings: torch.Tensor,
                      entity_sequence_mask: torch.Tensor,
@@ -433,6 +461,7 @@ class TransformerEncoder(BaseEncoder):
         @param input_sequence: (n_batch, <=n_digits). sequence of the input codes.
         @param entity_embeddings: (n_batch, max(entity_span), n_emb). stack of the subword embeddings within entity span.
         @param entity_sequence_mask: (n_batch, max(entity_span)). mask of the entity embeddings.
+        @param on_inference: inference mode (True) or not (False)
         @param kwargs:
         @return:
         """
@@ -449,14 +478,13 @@ class TransformerEncoder(BaseEncoder):
             tgt_mask = self.generate_square_subsequent_mask(sz=n_digits).to(device)
 
         # prepare memory embeddings and masks
-        memory = entity_embeddings
+        memory = self.forward_base_memory_encoder(entity_embeddings=entity_embeddings, entity_sequence_mask=entity_sequence_mask)
         memory_key_padding_mask = entity_sequence_mask
 
+        # compute transformer decoder
         if self._batch_first:
             tgt = tgt.swapaxes(0, 1)
             memory = memory.swapaxes(0, 1)
-
-        # compute transformer decoder
         h_out = self._decoder.forward(tgt=tgt, tgt_mask=tgt_mask, memory=memory, memory_key_padding_mask=memory_key_padding_mask)
         if self._batch_first:
             h_out = h_out.swapaxes(0, 1)
@@ -476,12 +504,8 @@ class TransformerEncoder(BaseEncoder):
         # t_code_prob: (n_batch, n_digits, n_ary)
         t_code_prob = torch.stack(lst_code_probs, dim=1)
 
-        # sample continuous relaxed codes
-        # (2021-11-11) this will never be used because we do not support student forcing on training so far.
-        if self.has_discretizer and (not on_inference):
-            t_latent_code = self._discretizer.forward(t_code_prob)
-        else:
-            t_latent_code = t_code_prob
+        # we never apply stochastic sampling because transformer does not accept student forcing.
+        t_latent_code = t_code_prob
 
         return t_latent_code, t_code_prob
 
@@ -550,11 +574,19 @@ class TransformerEncoder(BaseEncoder):
 
     @property
     def has_discretizer(self):
-        return self._discretizer is not None
+        return False
+
+    @property
+    def has_memory_encoder(self):
+        return self._memory_encoder is not None
+
+    @property
+    def entity_embeddings_encoder(self):
+        return self._memory_encoder
 
     @property
     def discretizer(self):
-        return self._discretizer
+        return None
 
     @property
     def n_digits(self):
@@ -575,12 +607,13 @@ class TransformerEncoder(BaseEncoder):
     def summary(self):
         ret = {
             "class_name": self.__class__.__name__,
+            "n_dim_hidden": self._n_dim_hidden,
             "n_head": self._n_head,
-            "n_layer": self._n_layer,
+            "num_decoder_layers": self._num_decoder_layers,
+            "num_encoder_layers": self._num_encoder_layers,
             "pos_tagset": self._pos_tagset,
+            "layer_normalization": self._layer_normalization
             # "n_digits": self.n_digits,
             # "n_ary": self.n_ary
         }
-        if self.has_discretizer:
-            ret["discretizer"] = self._discretizer.summary()
         return ret
