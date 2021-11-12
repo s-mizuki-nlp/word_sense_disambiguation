@@ -16,13 +16,13 @@ from torch import nn
 from torch.nn import functional as F
 from contextlib import ExitStack
 from dataset import utils
-from .encoder import LSTMEncoder
+from .encoder import LSTMEncoder, TransformerEncoder
 from .attention import EntityVectorEncoder, InitialStatesEncoder
 
 
 class HierarchicalCodeEncoder(nn.Module):
 
-    def __init__(self, encoder: LSTMEncoder,
+    def __init__(self, encoder: [LSTMEncoder, TransformerEncoder],
                  entity_vector_encoder: Optional[EntityVectorEncoder] = None,
                  initial_states_encoder: Optional[InitialStatesEncoder] = None,
                  **kwargs):
@@ -32,6 +32,13 @@ class HierarchicalCodeEncoder(nn.Module):
         self._encoder_class_name = encoder.__class__.__name__
         self._entity_vector_encoder = entity_vector_encoder
         self._initial_states_encoder = initial_states_encoder
+        if self._encoder_class_name == "TransformerEncoder":
+            if entity_vector_encoder is not None:
+                warnings.warn(f"{self._encoder_class_name} does not use `entity_vector_encoder`.")
+            if initial_states_encoder is not None:
+                warnings.warn(f"{self._encoder_class_name} does not use `initial_states_encoder`.")
+            self._entity_vector_encoder = None
+            self._initial_states_encoder = None
 
     @property
     def n_ary(self):

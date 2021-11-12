@@ -329,6 +329,9 @@ class TransformerEncoder(BaseEncoder):
 
         super().__init__(n_ary=n_ary)
 
+        if kwargs.get("teacher_forcing", False):
+            warnings.warn(f"`teacher_forcing=True` is invalid for TransformerEncoder module.")
+
         self._n_dim_hidden = n_dim_emb
         self._n_digits = n_digits
         # self._n_ary = n_ary
