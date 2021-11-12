@@ -233,12 +233,22 @@ class SynsetDataset(NDJSONDataset, Dataset):
         else:
             raise ValueError(f"unknown key type: {type(synset_id_or_synset_code)}")
 
+    def __contains__(self, synset_id_or_synset_code: Union[str, List[int]]):
+        try:
+            self.__getitem__(synset_id_or_synset_code)
+            return True
+        except:
+            return False
+
     def get_parent_synset(self, synset_id: str):
-        parent_synset_id = self[synset_id]["parent_synset_id"]
+        parent_synset_id = self[synset_id].get("parent_synset_id", None)
         if parent_synset_id is None:
             return None
         else:
-            return self[parent_synset_id]
+            if parent_synset_id in self:
+                return self[parent_synset_id]
+            else:
+                return None
 
     def get_ancestor_synsets(self, synset_id: str):
         lst_ancestors = []

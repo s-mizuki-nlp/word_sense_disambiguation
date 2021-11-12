@@ -15,6 +15,10 @@ from dataset_preprocessor import utils_wordnet
 from .utils import lemma_pos_to_tuple
 
 
+def trim_top_digit(synset_code: List[int]):
+    return synset_code[1:]
+
+
 class EmbeddingNormalizer(object):
 
     def __init__(self, field_name_embedding="embedding"):
@@ -48,7 +52,6 @@ class HyponymyEntryToListOfHyponymyPair(object):
             return [(hyponym, hyper) for hyper in hypernyms]
         else:
             raise AssertionError("could not get hypernym.")
-
 
 class FieldTypeConverter(object):
 
