@@ -6,8 +6,7 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-import numpy as np
-from dataset.transform import FieldTypeConverter, trim_top_digit
+from dataset.transform import top_digit_remover, top_digits_remover
 from dataset.filter import DictionaryFilter
 _root_synset_filter = DictionaryFilter(excludes={"id":{"entity.n.01", "verb_dummy_root.v.01"}})
 
@@ -23,6 +22,13 @@ cfg_lemma_datasets = {
         "monosemous_entity_only": False,
         "lemma_lowercase": True,
         "description": "DEFAULT Dataset. WordNet(N+V), includes instance-of, N_ary = 64.",
+    },
+    "WordNet-noun-verb-incl-instance-without-top-digit": {
+        "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "lemma_dictionary_pos-n+v_ary-64_incl-instance-of.jsonl"),
+        "transform_functions": {"synset_codes": top_digits_remover},
+        "binary": False,
+        "lemma_lowercase": True,
+        "description": "DEFAULT Dataset. WordNet(N+V), includes instance-of, N_ary = 64, Trim most significant (=top) digit and removed root entity (i.e. entity.n.01)",
     },
     "WordNet-noun-verb-incl-instance-monosemous": {
         "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "lemma_dictionary_pos-n+v_ary-64_incl-instance-of.jsonl"),
@@ -64,7 +70,7 @@ cfg_synset_datasets = {
     },
     "WordNet-noun-verb-incl-instance-without-top-digit": {
         "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "synset_taxonomy_pos-n+v_ary-64_incl-instance-of.jsonl"),
-        "transform_functions": {"code": trim_top_digit},
+        "transform_functions": {"code": top_digit_remover},
         "filter_function": _root_synset_filter,
         "binary": False,
         "lemma_lowercase": True,
