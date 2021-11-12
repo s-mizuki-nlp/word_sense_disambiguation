@@ -122,14 +122,14 @@ class LemmaDataset(NDJSONDataset, Dataset):
     @property
     def synset_code_n_digits(self):
         if not hasattr(self, "_synset_code_n_digits"):
-            self._synset_code_n_digits = self._apply(apply_field_name="synset_codes",
+            self._synset_code_n_digits = self._apply(apply_field_name="synset_codes", disable_transform_functions=False,
                            apply_function=lambda it_lst_codes: max([max(map(len, lst_codes)) for lst_codes in it_lst_codes]))
         return self._synset_code_n_digits
 
     @property
     def synset_code_n_ary(self):
         if not hasattr(self, "_synset_code_n_ary"):
-            self._synset_code_n_ary = self._apply(apply_field_name="synset_codes",
+            self._synset_code_n_ary = self._apply(apply_field_name="synset_codes", disable_transform_functions=False,
                            apply_function=lambda it_lst_codes: max([max(map(max, lst_codes)) for lst_codes in it_lst_codes]) + 1)
         return self._synset_code_n_ary
 
@@ -172,6 +172,7 @@ class LemmaDataset(NDJSONDataset, Dataset):
         v["synset_code_n_ary"] = self.synset_code_n_ary
         v["n_lemma_and_pos"] = self.n_lemma_and_pos
         v["n_lemma"] = self.n_lemma
+        v["pos_tagset"] = self.pos_tagset
         v["n_pos"] = self.n_pos
         v["monosemous_entity_only"] = self._monosemous_entity_only
         return v

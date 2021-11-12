@@ -50,15 +50,18 @@ class AbstractFormatDataset(metaclass=ABCMeta):
     def _record_loader(self):
         pass
 
-    def _apply(self, apply_field_name: str, apply_function: Callable, na_value: Optional[Any] = None):
+    def _apply(self, apply_field_name: str, apply_function: Callable, na_value: Optional[Any] = None,
+               disable_transform_functions: bool = True):
 
-        _transform_cache = self._transform_functions
-        self._transform_functions = None
+        if disable_transform_functions:
+            _transform_cache = self._transform_functions
+            self._transform_functions = None
 
         it = (entry.get(apply_field_name, na_value) for entry in self)
-        ret =  apply_function(filter(bool, it))
+        ret = apply_function(filter(bool, it))
 
-        self._transform_functions = _transform_cache
+        if disable_transform_functions:
+            self._transform_functions = _transform_cache
         return ret
 
     def distinct_values(self, column: str) -> List[str]:
