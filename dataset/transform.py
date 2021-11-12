@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 from __future__ import division
 from __future__ import print_function
 
-from typing import Dict, Callable, Optional, List, Tuple
+from typing import Dict, Callable, Optional, List, Tuple, Union
 from collections import defaultdict, Counter
 import os, sys, io, json
 import numpy as np
@@ -15,9 +15,11 @@ from dataset_preprocessor import utils_wordnet
 from .utils import lemma_pos_to_tuple
 
 
-def trim_top_digit(synset_code: List[int]):
-    return synset_code[1:]
+def top_digit_remover(synset_code: List[int]):
+    return synset_code[1:] + [0]
 
+def top_digits_remover(synset_codes: List[List[int]]):
+    return list(map(top_digit_remover, synset_codes))
 
 class EmbeddingNormalizer(object):
 
