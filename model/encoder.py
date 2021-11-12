@@ -3,6 +3,7 @@
 import warnings
 from typing import Optional, Dict, Any, Union, Tuple, List, Iterable
 
+import math
 import numpy as np
 import torch
 from torch import nn
@@ -315,6 +316,7 @@ class TransformerEncoder(BaseEncoder):
     def __init__(self, n_dim_emb: int, n_digits: int, n_ary: int,
                  n_layer: int, n_head: int,
                  pos_tagset: Iterable[str],
+                 layer_normalization: bool = False,
                  discretizer: Optional[nn.Module] = None,
                  norm_digit_embeddings: bool = False,
                  ignore_trailing_zero_digits: bool = False,
@@ -333,6 +335,7 @@ class TransformerEncoder(BaseEncoder):
         self._discretizer = discretizer
         self._n_layer = n_layer
         self._n_head = n_head
+        self._layer_normalization = layer_normalization
         self._dropout = dropout
         self._norm_digit_embeddings = norm_digit_embeddings
         self._ignore_trailing_zero_digits = ignore_trailing_zero_digits
@@ -375,10 +378,22 @@ class TransformerEncoder(BaseEncoder):
             "dropout":self._dropout
         }
         layer = nn.TransformerDecoderLayer(**cfg_transformer_decoder_layer)
-        self._decoder = nn.TransformerDecoder(layer, num_layers=self._n_layer)
+
+        if self._layer_normalization:
+            norm = nn.LayerNorm(normalized_shape=self._n_dim_hidden)
+        else:
+            norm = None
+        self._decoder = nn.TransformerDecoder(layer, num_layers=self._n_layer, norm=norm)
 
         # logits layer
-        self._softmax_logit_layer = nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary, bias=False)
+        self._softmax_logit_layer = nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary, bias=True)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        initrange = 0.1
+        nn.init.uniform_(self._emb_layer.weight, -initrange, initrange)
+        nn.init.zeros_(self._softmax_logit_layer.weight)
 
     def create_sequence_inputs(self, lst_pos: List[str], device,
                                ground_truth_synset_codes: Optional[Union[List[List[int]], torch.Tensor]] = None) -> torch.Tensor:
@@ -399,11 +414,15 @@ class TransformerEncoder(BaseEncoder):
         t_inputs = torch.cat((t_boc, ground_truth_synset_codes[:,:self._n_digits-1]), dim=-1)
         return t_inputs
 
-    def subsequent_mask(self, n_seq_length: int):
-        "Mask out subsequent positions of target embeddings."
-        attn_shape = (n_seq_length, n_seq_length)
-        subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
-        return torch.from_numpy(subsequent_mask) == 1
+    @staticmethod
+    def generate_square_subsequent_mask(sz: int) -> torch.Tensor:
+        r"""
+        Generate a square mask for the sequence. The masked positions are filled with float('-inf').
+        Unmasked positions are filled with float(0.0).
+        ref: https://pytorch.org/docs/1.10.0/generated/torch.nn.Transformer.html
+        """
+        return torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
+
 
     def forward_base(self, input_sequence: torch.Tensor, entity_embeddings: torch.Tensor,
                      entity_sequence_mask: torch.Tensor,
@@ -420,12 +439,14 @@ class TransformerEncoder(BaseEncoder):
 
         n_digits = min(self._n_digits, input_sequence.shape[-1])
         # compute target embeddings: (n_batch, n_digits, n_dim_emb)
-        tgt = self._pe_layer.forward( self._emb_layer.forward(input_sequence) )
+        t_emb = self._emb_layer.forward(input_sequence) * math.sqrt(self._n_dim_hidden)
+        tgt = self._pe_layer.forward(t_emb)
         # prepare subsequent masks: (n_digits, n_digits)
         if on_inference:
             tgt_mask = None
         else:
-            tgt_mask = self.subsequent_mask(n_seq_length=n_digits)
+            _, device = self._dtype_and_device(input_sequence)
+            tgt_mask = self.generate_square_subsequent_mask(sz=n_digits).to(device)
 
         # prepare memory embeddings and masks
         memory = entity_embeddings
