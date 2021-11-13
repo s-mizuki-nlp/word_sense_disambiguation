@@ -108,17 +108,3 @@ class BERTEmbeddingsDataset(BERTEmbeddingsBatchDataset):
                     "record": record
                 }
                 yield dict_record
-
-    @property
-    def num_entities(self):
-        if hasattr(self, "_num_entities"):
-            return self._num_entities
-
-        num_entities = 0
-        ifs = h5py.File(self._path, mode="r")
-        for group_name, group in ifs.items():
-            records = json.loads(group["records"][()])
-            num_entities += len(records)
-        ifs.close()
-        self._num_entities = num_entities
-        return self._num_entities
