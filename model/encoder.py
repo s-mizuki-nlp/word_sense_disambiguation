@@ -426,7 +426,11 @@ class TransformerEncoder(BaseEncoder):
     def _init_weights(self):
         initrange = 0.1
         nn.init.uniform_(self._emb_layer.weight, -initrange, initrange)
-        nn.init.zeros_(self._softmax_logit_layer.weight)
+        if isinstance(self._softmax_logit_layer, nn.ModuleList):
+            for layer in self._softmax_logit_layer:
+                nn.init.zeros_(layer.weight)
+        else:
+            nn.init.zeros_(self._softmax_logit_layer.weight)
 
     def create_sequence_inputs(self, lst_pos: List[str], device,
                                ground_truth_synset_codes: Optional[Union[List[List[int]], torch.Tensor]] = None) -> torch.Tensor:
