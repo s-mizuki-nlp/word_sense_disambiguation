@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, BufferedShuffleDataset
 
 from dataset import WSDTaskDataset, WSDTaskDatasetCollateFunction
 from dataset.lexical_knowledge import LemmaDataset, SynsetDataset
@@ -27,12 +27,16 @@ def CreateWSDTaskDataset(cfg_bert_embeddings: Dict[str, Any],
     return dataset
 
 
-def WSDTaskDataLoader(dataset: WSDTaskDataset,
+def WSDTaskDataLoader(dataset: Union[WSDTaskDataset, BufferedShuffleDataset],
                       batch_size: int,
                       cfg_collate_function: Dict[str, Any] = {},
                       **kwargs):
     if "is_trainset" not in cfg_collate_function:
-        cfg_collate_function["is_trainset"] = dataset.is_trainset
+        if isinstance(dataset, BufferedShuffleDataset):
+            is_trainset = getattr(dataset.dataset, "is_trainset", False)
+        else:
+            is_trainset = dataset.is_trainset
+        cfg_collate_function["is_trainset"] = is_trainset
     collate_fn = WSDTaskDatasetCollateFunction(**cfg_collate_function)
     data_loader = DataLoader(dataset=dataset, batch_size=batch_size, collate_fn=collate_fn, **kwargs)
 
