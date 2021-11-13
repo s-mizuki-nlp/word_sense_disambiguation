@@ -326,6 +326,7 @@ class TransformerEncoder(BaseEncoder):
                  dropout: float = 0.1,
                  batch_first: bool = True,
                  prob_zero_monotone_increasing: bool = False,
+                 logit_function_type: str = "default",
                  **kwargs):
 
         super().__init__(n_ary=n_ary)
@@ -354,6 +355,7 @@ class TransformerEncoder(BaseEncoder):
         self._trainable_positional_encoding = trainable_positional_encoding
         self._batch_first = batch_first
         self._prob_zero_monotone_increasing = prob_zero_monotone_increasing
+        self._logit_function_type = logit_function_type
 
         self._build()
 
@@ -411,7 +413,13 @@ class TransformerEncoder(BaseEncoder):
         self._decoder = nn.TransformerDecoder(decoder_layer, num_layers=self._num_decoder_layers, norm=norm)
 
         # logits layer
-        self._softmax_logit_layer = nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary, bias=True)
+        if self._logit_function_type == "default":
+            self._softmax_logit_layer = nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary)
+        elif self._logit_function_type == "position_aware":
+            lst_layers = [nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary) for _ in range(self._n_digits)]
+            self._softmax_logit_layer = nn.ModuleList(lst_layers)
+        else:
+            raise AssertionError(f"unknown `logit_function_type` value: {self._logit_function_type}")
 
         self._init_weights()
 
@@ -502,7 +510,11 @@ class TransformerEncoder(BaseEncoder):
 
         # compute Pr{Y_d|y_{<d}}
         # lst_code_probs: List[tensor(n_batch, n_ary)]
-        lst_code_probs = [F.softmax(self._softmax_logit_layer(h_out[:, idx_d, :]), dim=-1) for idx_d in range(n_digits)]
+        if self._logit_function_type == "default":
+            lst_logits = [self._softmax_logit_layer(h_out[:,idx_d,:]) for idx_d in range(n_digits)]
+        elif self._logit_function_type == "position_aware":
+            lst_logits = [self._softmax_logit_layer[idx_d](h_out[:,idx_d,:]) for idx_d in range(n_digits)]
+        lst_code_probs = [F.softmax(logits, dim=-1) for logits in lst_logits]
 
         # adjust Pr{c_d=d|c_{<d}} so that Pr{c_d=0|c_{<d+1}} satisfies monotone increasing condition.
         if self._prob_zero_monotone_increasing:
@@ -623,7 +635,8 @@ class TransformerEncoder(BaseEncoder):
             "num_decoder_layers": self._num_decoder_layers,
             "num_encoder_layers": self._num_encoder_layers,
             "pos_tagset": self._pos_tagset,
-            "layer_normalization": self._layer_normalization
+            "layer_normalization": self._layer_normalization,
+            "logit_function_type": self._logit_function_type
             # "n_digits": self.n_digits,
             # "n_ary": self.n_ary
         }
