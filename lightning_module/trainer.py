@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 from __future__ import division
 from __future__ import print_function
 
-from typing import Optional, Dict, Callable, Union
+from typing import Optional, Dict, Callable, Union, Any
 import warnings
 from collections import defaultdict
 import pickle
@@ -15,7 +15,9 @@ from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 from torch.nn.modules.loss import _Loss
+from torch import optim
 from torch.optim import Adam
+from torch_optimizer import RAdam
 from pytorch_lightning import LightningModule
 
 from model import HierarchicalCodeEncoder
@@ -27,11 +29,12 @@ class SenseCodeTrainer(LightningModule):
     def __init__(self,
                  model: HierarchicalCodeEncoder,
                  loss_supervised: Union[HyponymyScoreLoss, EntailmentProbabilityLoss, CrossEntropyLossWrapper],
-                 learning_rate: Optional[float] = 0.001,
-                 optimizer_class: Optional[Optimizer] = None,
+                 learning_rate: float = 5E-6,
+                 optimizer_class_name: str = "RAdam",
                  use_sampled_code_repr_for_loss_computation: bool = False,
                  model_parameter_schedulers: Optional[Dict[str, Callable[[float], float]]] = None,
-                 loss_parameter_schedulers: Optional[Dict[str, Callable[[float], float]]] = None
+                 loss_parameter_schedulers: Optional[Dict[str, Callable[[float], float]]] = None,
+                 optimizer_params: Optional[Dict[str, Any]] = None
                  ):
 
         super().__init__()
@@ -51,7 +54,8 @@ class SenseCodeTrainer(LightningModule):
         self.save_hyperparameters(hparams)
 
         self._learning_rate = learning_rate
-        self._optimizer_class = optimizer_class
+        self._optimizer_class_name = optimizer_class_name
+        self._optimizer_params = {} if optimizer_params is None else optimizer_params
         # auxiliary function that is solely used for validation
         self._aux_hyponymy_score = HyponymyScoreLoss()
         self._aux_cross_entropy = CrossEntropyLossWrapper()
@@ -74,12 +78,13 @@ class SenseCodeTrainer(LightningModule):
         return (next(self._model.parameters())).device
 
     def configure_optimizers(self):
-        if self._optimizer_class is None:
-            opt = Adam(self.parameters(), lr=self._learning_rate)
-        elif self._optimizer_class.__name__ == "SAM":
-            opt = self._optimizer_class(self.parameters(), Adam, lr=self._learning_rate)
+        if self._optimizer_class_name == "Adam":
+            opt = Adam(self.parameters(), lr=self._learning_rate, **self._optimizer_params)
+        elif self._optimizer_class_name == "RAdam":
+            opt = RAdam(self.parameters(), lr=self._learning_rate, **self._optimizer_params)
         else:
-            opt = self._optimizer_class(params=self.parameters(), lr=self._learning_rate)
+            _optimizer_class = getattr(optim, self._optimizer_class_name)
+            opt = _optimizer_class(params=self.parameters(), lr=self._learning_rate, **self._optimizer_params)
         return opt
 
     @property
