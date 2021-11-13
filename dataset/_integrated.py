@@ -242,6 +242,7 @@ class WSDTaskDatasetCollateFunction(object):
         # token info, context embeddings and entity embeddings
         lst_lemmas = _list_of("lemma")
         lst_pos = _list_of("pos")
+        lst_subword_spans = _list_of("subword_spans")
         lst_context_sequence_lengths = _list_of("context_sequence_length")
         lst_lagged_context_embeddings = _list_of("context_embedding")
         lst_entity_sequence_lengths = _list_of("entity_sequence_length")
@@ -249,6 +250,7 @@ class WSDTaskDatasetCollateFunction(object):
         dict_ret = {
             "lemmas": lst_lemmas,
             "pos": lst_pos,
+            "subword_spans": lst_subword_spans,
             "context_sequence_lengths": torch.tensor(lst_context_sequence_lengths),
             "context_embeddings": utils.pad_and_stack_list_of_tensors(lst_lagged_context_embeddings),
             "entity_sequence_lengths": torch.tensor(lst_entity_sequence_lengths),
@@ -283,7 +285,7 @@ class WSDTaskDatasetCollateFunction(object):
         # other attributes are accumulated as `records` object.
         if self._return_records:
             trim_plural = lambda name: name[:-1] if name.endswith("s") else name
-            set_essential_fields = {"pos", "lemma"}
+            set_essential_fields = {"pos", "lemma", "subword_spans"}
             set_caught_fields = set([trim_plural(name) for name in dict_ret.keys()])
             set_uncaught_fields = (set_field_names - set_caught_fields) | set_essential_fields
             lst_records = [{name:e_object.get(name, None) for name in set_uncaught_fields} for e_object in lst_entity_objects]

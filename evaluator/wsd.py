@@ -131,7 +131,7 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
         lst_synset_ids = [lemma.synset().name() for lemma in lst_candidate_lemmas]
         lst_synset_codes = [self._lexical_knowledge_synset.get_synset_code(synset_id) for synset_id in lst_synset_ids]
         # t_candidate_codes: (n_candidates, n_digits, n_ary)
-        t_candidate_codes = torch.LongTensor(lst_synset_codes, device=t_code_prob.device)
+        t_candidate_codes = torch.LongTensor(lst_synset_codes, device="cpu").to(t_code_prob.device)
         # calc score for each candidate using specified inference metric.
         lst_metric_scores = self.score_by_inference_metric(candidate_codes=t_candidate_codes, predicted_code_prob=t_code_prob)
 
