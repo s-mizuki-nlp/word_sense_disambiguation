@@ -318,6 +318,7 @@ class TransformerEncoder(BaseEncoder):
                  num_decoder_layers: int,
                  n_head: int,
                  pos_tagset: Iterable[str],
+                 memory_encoder_input_feature: str = "entity",
                  layer_normalization: bool = False,
                  norm_digit_embeddings: bool = False,
                  ignore_trailing_zero_digits: bool = False,
@@ -331,12 +332,19 @@ class TransformerEncoder(BaseEncoder):
 
         if kwargs.get("teacher_forcing", False):
             warnings.warn(f"`teacher_forcing=True` is invalid for TransformerEncoder module.")
+        if num_encoder_layers > 0:
+            set_features = {"entity","context"}
+            if memory_encoder_input_feature not in set_features:
+                raise ValueError(f"`memory_encoder_input_feature` must be: {set_features}")
+        else:
+            memory_encoder_input_feature = None
 
         self._n_dim_hidden = n_dim_emb
         self._n_digits = n_digits
         # self._n_ary = n_ary
         self._pos_tagset = sorted(list(pos_tagset))
         self._num_encoder_layers = num_encoder_layers
+        self._memory_encoder_input_feature = memory_encoder_input_feature
         self._num_decoder_layers = num_decoder_layers
         self._n_head = n_head
         self._layer_normalization = layer_normalization
@@ -417,7 +425,7 @@ class TransformerEncoder(BaseEncoder):
         # 1. prepend PoS index
         # t_boc: (n_batch, 1)
         lst_pos_idx = [self._pos_index[pos] for pos in lst_pos]
-        t_boc = torch.LongTensor(lst_pos_idx, device=device).unsqueeze(dim=-1)
+        t_boc = torch.LongTensor(lst_pos_idx, device="cpu").unsqueeze(dim=-1).to(device)
 
         if ground_truth_synset_codes is None:
             return t_boc
@@ -425,7 +433,7 @@ class TransformerEncoder(BaseEncoder):
         # 2. concat with one-shifted ground-truth codes.
         # ground_truth_synset_codes: (n_batch, <=n_digits)
         if isinstance(ground_truth_synset_codes, list):
-            ground_truth_synset_codes = torch.LongTensor(ground_truth_synset_codes, device=device)
+            ground_truth_synset_codes = torch.LongTensor(ground_truth_synset_codes, device="cpu").to(device)
         # input sequence length must be less or equal to n_digits.
         # t_inputs: (n_batch, <n_digits)
         t_inputs = torch.cat((t_boc, ground_truth_synset_codes[:,:self._n_digits-1]), dim=-1)
