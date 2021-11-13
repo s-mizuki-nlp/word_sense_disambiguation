@@ -510,7 +510,7 @@ class TransformerEncoder(BaseEncoder):
     def forward_base(self, input_sequence: torch.Tensor,
                      entity_embeddings: torch.Tensor,
                      entity_sequence_mask: torch.Tensor,
-                     on_inference: bool,
+                     apply_autoregressive_mask: bool,
                      context_embeddings: Optional[torch.Tensor] = None,
                      context_sequence_mask: Optional[torch.Tensor] = None,
                      subword_spans: List[List[List[int]]] = None,
@@ -520,7 +520,7 @@ class TransformerEncoder(BaseEncoder):
         @param input_sequence: (n_batch, <=n_digits). sequence of the input codes.
         @param entity_embeddings: (n_batch, max(entity_span), n_emb). stack of the subword embeddings within entity span.
         @param entity_sequence_mask: (n_batch, max(entity_span)). mask of the entity embeddings.
-        @param on_inference: inference mode (True) or not (False)
+        @param apply_autoregressive_mask: autoregressive (=left-to-right) prediction (True) or not (False)
         @param kwargs:
         @return:
         """
@@ -539,11 +539,11 @@ class TransformerEncoder(BaseEncoder):
         memory_key_padding_mask = entity_sequence_mask
 
         # prepare subsequent masks: (n_digits, n_digits)
-        if on_inference:
-            tgt_mask = None
-        else:
+        if apply_autoregressive_mask:
             _, device = self._dtype_and_device(input_sequence)
             tgt_mask = self.generate_square_subsequent_mask(sz=n_digits).to(device)
+        else:
+            tgt_mask = None
 
         # compute decoding
         if self._batch_first:
@@ -596,13 +596,13 @@ class TransformerEncoder(BaseEncoder):
                 input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=t_codes)
             # t_code_probs_upto_d: (n_batch, digit+1, n_ary)
             _, t_code_probs_upto_d = self.forward_base(input_sequence=input_sequence,
-                                                     entity_embeddings=entity_embeddings,
-                                                     entity_sequence_mask=entity_sequence_mask,
-                                                     context_embeddings=context_embeddings,
-                                                     context_sequence_mask=context_sequence_mask,
-                                                     subword_spans=subword_spans,
-                                                     on_inference=True,
-                                                     **kwargs)
+                                                       entity_embeddings=entity_embeddings,
+                                                       entity_sequence_mask=entity_sequence_mask,
+                                                       context_embeddings=context_embeddings,
+                                                       context_sequence_mask=context_sequence_mask,
+                                                       subword_spans=subword_spans,
+                                                       apply_autoregressive_mask=True,
+                                                       **kwargs)
 
             # t_code_probs_d: (n_batch, 1, n_ary)
             t_code_probs_d = t_code_probs_upto_d[:, digit, :].unsqueeze(1)
@@ -635,7 +635,7 @@ class TransformerEncoder(BaseEncoder):
                                  context_embeddings=context_embeddings,
                                  context_sequence_mask=context_sequence_mask,
                                  subword_spans=subword_spans,
-                                 on_inference=False,
+                                 apply_autoregressive_mask=True,
                                  **kwargs)
 
     def forward(self, pos: List[str], entity_embeddings: torch.Tensor,
