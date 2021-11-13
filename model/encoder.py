@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.nn.utils.rnn import pad_sequence
 
 from .loss_unsupervised import CodeValueMutualInformationLoss
 from .onmt.global_attention import GlobalAttention
@@ -169,8 +170,6 @@ class LSTMEncoder(BaseEncoder):
         @param on_inference: inference(True) or training(False)
         @return: tuple of (sampled codes, code probabilities). shape: (n_batch, n_digits, n_ary)
         """
-        if isinstance(pos, str):
-            pos = [pos]
 
         if entity_vectors is not None:
             t = entity_vectors
@@ -460,24 +459,61 @@ class TransformerEncoder(BaseEncoder):
         """
         return torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
 
-    def forward_base_memory_encoder(self, entity_embeddings: torch.Tensor, entity_sequence_mask: torch.Tensor, **kwargs):
+    def _extract_entity_embeddings_from_context_embeddings(self,
+                                    context_embeddings: torch.Tensor,
+                                    subword_spans: List[List[List[int]]],
+                                    padding_value: float = 0.0) -> torch.Tensor:
+        """
+        extracts entity subword embeddings from context embeddings specified by subword_spans argument.
+
+        @param context_embeddings: (n_batch, n_max_seq_length, n_dim).
+        @param subword_spans: list of the list of span of the subwords within the entity. i.e. [[[2,4],[4,5]]]. subword_spans[batch][word][subword]
+        @return: (n_batch, n_max_entity_span, n_dim)
+        """
+        lst_subword_ranges = [(subword_span[0][0], subword_span[-1][1]) for subword_span in subword_spans]
+        it = zip(lst_subword_ranges, context_embeddings)
+        lst_entity_embeddings = [context[slice(*subword_span),:] for subword_span, context in it]
+        entity_embeddings = pad_sequence(lst_entity_embeddings, batch_first=True, padding_value=padding_value)
+        return entity_embeddings
+
+    def forward_base_memory_encoder(self, entity_embeddings: torch.Tensor,
+                                    entity_sequence_mask: torch.Tensor,
+                                    context_embeddings: Optional[torch.Tensor] = None,
+                                    context_sequence_mask: Optional[torch.Tensor] = None,
+                                    subword_spans: List[List[List[int]]] = None,
+                                    **kwargs):
         # prepare memory embeddings
         if self.has_memory_encoder:
-            src = entity_embeddings
+            if self._memory_encoder_input_feature == "entity":
+                src = entity_embeddings
+                src_key_padding_mask = entity_sequence_mask
+            elif self._memory_encoder_input_feature == "context":
+                src = context_embeddings
+                src_key_padding_mask = context_sequence_mask
+
             if self._batch_first:
                 src = src.swapaxes(0, 1)
-            src_key_padding_mask = entity_sequence_mask
+
             memory = self._memory_encoder.forward(src=src, src_key_padding_mask=src_key_padding_mask)
             if self._batch_first:
                 memory = memory.swapaxes(0, 1)
+
+            if self._memory_encoder_input_feature == "context":
+                memory = self._extract_entity_embeddings_from_context_embeddings(context_embeddings=memory,
+                                                                                 subword_spans=subword_spans)
         else:
             memory = entity_embeddings
 
+        # memory: (n_batch, n_max_entity_span, n_dim)
         return memory
 
-    def forward_base(self, input_sequence: torch.Tensor, entity_embeddings: torch.Tensor,
+    def forward_base(self, input_sequence: torch.Tensor,
+                     entity_embeddings: torch.Tensor,
                      entity_sequence_mask: torch.Tensor,
                      on_inference: bool,
+                     context_embeddings: Optional[torch.Tensor] = None,
+                     context_sequence_mask: Optional[torch.Tensor] = None,
+                     subword_spans: List[List[List[int]]] = None,
                      **kwargs):
         """
 
@@ -493,6 +529,15 @@ class TransformerEncoder(BaseEncoder):
         # compute target embeddings: (n_batch, n_digits, n_dim_emb)
         t_emb = self._emb_layer.forward(input_sequence) * math.sqrt(self._n_dim_hidden)
         tgt = self._pe_layer.forward(t_emb)
+
+        # prepare memory embeddings and masks
+        memory = self.forward_base_memory_encoder(entity_embeddings=entity_embeddings,
+                                                  entity_sequence_mask=entity_sequence_mask,
+                                                  context_embeddings=context_embeddings,
+                                                  context_sequence_mask=context_sequence_mask,
+                                                  subword_spans=subword_spans)
+        memory_key_padding_mask = entity_sequence_mask
+
         # prepare subsequent masks: (n_digits, n_digits)
         if on_inference:
             tgt_mask = None
@@ -500,11 +545,7 @@ class TransformerEncoder(BaseEncoder):
             _, device = self._dtype_and_device(input_sequence)
             tgt_mask = self.generate_square_subsequent_mask(sz=n_digits).to(device)
 
-        # prepare memory embeddings and masks
-        memory = self.forward_base_memory_encoder(entity_embeddings=entity_embeddings, entity_sequence_mask=entity_sequence_mask)
-        memory_key_padding_mask = entity_sequence_mask
-
-        # compute transformer decoder
+        # compute decoding
         if self._batch_first:
             tgt = tgt.swapaxes(0, 1)
             memory = memory.swapaxes(0, 1)
@@ -538,6 +579,9 @@ class TransformerEncoder(BaseEncoder):
 
     def forward_inference_greedy(self, pos: List[str], entity_embeddings: torch.Tensor,
                                  entity_sequence_mask: torch.Tensor,
+                                 context_embeddings: Optional[torch.Tensor] = None,
+                                 context_sequence_mask: Optional[torch.Tensor] = None,
+                                 subword_spans: List[List[List[int]]] = None,
                                  **kwargs):
         # decoding using greedy search
         # return: t_code_probs: (n_batch, n_digits, n_ary). t_code_probs[n,d] = Pr(Y|\hat{y_{<d}})
@@ -554,6 +598,9 @@ class TransformerEncoder(BaseEncoder):
             _, t_code_probs_upto_d = self.forward_base(input_sequence=input_sequence,
                                                      entity_embeddings=entity_embeddings,
                                                      entity_sequence_mask=entity_sequence_mask,
+                                                     context_embeddings=context_embeddings,
+                                                     context_sequence_mask=context_sequence_mask,
+                                                     subword_spans=subword_spans,
                                                      on_inference=True,
                                                      **kwargs)
 
@@ -575,29 +622,46 @@ class TransformerEncoder(BaseEncoder):
                          entity_embeddings: torch.Tensor,
                          entity_sequence_mask: torch.Tensor,
                          ground_truth_synset_codes: torch.Tensor,
+                         context_embeddings: Optional[torch.Tensor] = None,
+                         context_sequence_mask: Optional[torch.Tensor] = None,
+                         subword_spans: List[List[List[int]]] = None,
                          **kwargs):
         dtype, device = self._dtype_and_device(entity_embeddings)
         input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device,
                                                      ground_truth_synset_codes=ground_truth_synset_codes)
         return self.forward_base(input_sequence=input_sequence,
                                  entity_embeddings=entity_embeddings,
-                                 entity_sequence_mask=entity_sequence_mask, on_inference=False,
+                                 entity_sequence_mask=entity_sequence_mask,
+                                 context_embeddings=context_embeddings,
+                                 context_sequence_mask=context_sequence_mask,
+                                 subword_spans=subword_spans,
+                                 on_inference=False,
                                  **kwargs)
 
     def forward(self, pos: List[str], entity_embeddings: torch.Tensor,
                 entity_sequence_mask: torch.Tensor,
+                context_embeddings: Optional[torch.Tensor] = None,
+                context_sequence_mask: Optional[torch.Tensor] = None,
                 ground_truth_synset_codes: Optional[torch.Tensor] = None,
+                subword_spans: List[List[List[int]]] = None,
                 on_inference: bool = False,
                 **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
-        if isinstance(pos, str):
-            pos = [pos]
-
         if not on_inference:
             return self.forward_training(pos=pos, entity_embeddings=entity_embeddings,
-                                         entity_sequence_mask=entity_sequence_mask, ground_truth_synset_codes=ground_truth_synset_codes)
+                                         entity_sequence_mask=entity_sequence_mask,
+                                         context_embeddings=context_embeddings,
+                                         context_sequence_mask=context_sequence_mask,
+                                         ground_truth_synset_codes=ground_truth_synset_codes,
+                                         subword_spans=subword_spans,
+                                         **kwargs)
         else:
-            return self.forward_inference_greedy(pos=pos, entity_embeddings=entity_embeddings,
-                                                 entity_sequence_mask=entity_sequence_mask, **kwargs)
+            return self.forward_inference_greedy(pos=pos,
+                                                 entity_embeddings=entity_embeddings,
+                                                 entity_sequence_mask=entity_sequence_mask,
+                                                 context_embeddings=context_embeddings,
+                                                 context_sequence_mask=context_sequence_mask,
+                                                 subword_spans=subword_spans,
+                                                 **kwargs)
 
     @property
     def has_discretizer(self):
@@ -638,6 +702,7 @@ class TransformerEncoder(BaseEncoder):
             "n_head": self._n_head,
             "num_decoder_layers": self._num_decoder_layers,
             "num_encoder_layers": self._num_encoder_layers,
+            "memory_encoder_input_feature": self._memory_encoder_input_feature,
             "pos_tagset": self._pos_tagset,
             "layer_normalization": self._layer_normalization,
             "logit_function_type": self._logit_function_type

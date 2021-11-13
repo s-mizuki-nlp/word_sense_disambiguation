@@ -160,6 +160,9 @@ class HierarchicalCodeEncoder(nn.Module):
                               ground_truth_synset_codes: Optional[torch.Tensor] = None,
                               entity_embeddings: Optional[torch.Tensor] = None,
                               entity_sequence_mask: Optional[torch.BoolTensor] = None,
+                              context_embeddings: Optional[torch.Tensor] = None,
+                              context_sequence_mask: Optional[torch.Tensor] = None,
+                              subword_spans: List[List[List[int]]] = None,
                               on_inference: bool = False,
                               **kwargs):
         # ground truth codes
@@ -170,6 +173,9 @@ class HierarchicalCodeEncoder(nn.Module):
                                                            entity_embeddings=entity_embeddings,
                                                            entity_sequence_mask=entity_sequence_mask,
                                                            ground_truth_synset_codes=ground_truth_synset_codes,
+                                                           context_embeddings=context_embeddings,
+                                                           context_sequence_mask=context_sequence_mask,
+                                                           subword_spans=subword_spans,
                                                            on_inference=on_inference,
                                                            **kwargs)
 
@@ -183,10 +189,19 @@ class HierarchicalCodeEncoder(nn.Module):
                 context_embeddings: Optional[torch.Tensor] = None,
                 context_sequence_mask: Optional[torch.BoolTensor] = None,
                 context_sequence_lengths: Optional[torch.LongTensor] = None,
+                subword_spans: Optional[List[List[List[int]]]] = None,
                 requires_grad: bool = True,
                 on_inference: bool = False,
                 apply_argmax_on_inference: bool = False,
                 **kwargs):
+
+        if pos is not None:
+            if isinstance(pos, str):
+                pos = [pos]
+        if subword_spans is not None:
+            element = subword_spans[0][0]
+            if isinstance(element, int):
+                subword_spans = [subword_spans]
 
         with ExitStack() as context_stack:
             # if user doesn't require gradient, disable back-propagation
@@ -209,7 +224,10 @@ class HierarchicalCodeEncoder(nn.Module):
                 t_latent_code, t_code_prob = self.forward_by_tf_encoder(pos=pos,
                                                                         entity_embeddings=entity_embeddings,
                                                                         entity_sequence_mask=entity_sequence_mask,
+                                                                        context_embeddings=context_embeddings,
+                                                                        context_sequence_mask=context_sequence_mask,
                                                                         ground_truth_synset_codes=ground_truth_synset_codes,
+                                                                        subword_spans=subword_spans,
                                                                         on_inference=on_inference,
                                                                         **kwargs)
             else:
