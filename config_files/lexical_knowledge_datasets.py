@@ -30,6 +30,13 @@ cfg_lemma_datasets = {
         "lemma_lowercase": True,
         "description": "WordNet(N+V), includes instance-of, N_ary = 64. value assignment rule: random",
     },
+    "WordNet-noun-verb-incl-instance-unlimited-ary-random-assignment": {
+        "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "lemma_dictionary_pos-n+v_ary-None_assign-random_incl-instance-of.jsonl"),
+        "binary": False,
+        "monosemous_entity_only": False,
+        "lemma_lowercase": True,
+        "description": "WordNet(N+V), includes instance-of, N_ary = unlimited. value assignment rule: random",
+    },
     "WordNet-noun-verb-incl-instance-without-top-digit": {
         "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "lemma_dictionary_pos-n+v_ary-64_incl-instance-of.jsonl"),
         "transform_functions": {"synset_codes": top_digits_remover},
@@ -80,6 +87,12 @@ cfg_synset_datasets = {
         "binary": False,
         "lemma_lowercase": True,
         "description": "WordNet(N+V), includes instance-of, N_ary = 64. value assignment rule: random",
+    },
+    "WordNet-noun-verb-incl-instance-unlimited-ary-random-assignment": {
+        "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "synset_taxonomy_pos-n+v_ary-None_assign-random_incl-instance-of.jsonl"),
+        "binary": False,
+        "lemma_lowercase": True,
+        "description": "WordNet(N+V), includes instance-of, N_ary = unlimited. value assignment rule: random",
     },
     "WordNet-noun-verb-incl-instance-without-top-digit": {
         "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "synset_taxonomy_pos-n+v_ary-64_incl-instance-of.jsonl"),
