@@ -12,7 +12,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 from .loss_unsupervised import CodeValueMutualInformationLoss
 from .onmt.global_attention import GlobalAttention
-from .encoder_internal import PositionalEncoding
+from .encoder_internal import PositionAwareEmbedding, PositionalEncoding
 
 class BaseEncoder(nn.Module):
 
@@ -325,7 +325,8 @@ class TransformerEncoder(BaseEncoder):
                  dropout: float = 0.1,
                  batch_first: bool = True,
                  prob_zero_monotone_increasing: bool = False,
-                 logit_function_type: str = "default",
+                 embedding_layer_type: str = "default",
+                 logit_layer_type: str = "default",
                  **kwargs):
 
         super().__init__(n_ary=n_ary)
@@ -354,7 +355,8 @@ class TransformerEncoder(BaseEncoder):
         self._trainable_positional_encoding = trainable_positional_encoding
         self._batch_first = batch_first
         self._prob_zero_monotone_increasing = prob_zero_monotone_increasing
-        self._logit_function_type = logit_function_type
+        self._embedding_layer_type = embedding_layer_type
+        self._logit_layer_type = logit_layer_type
 
         self._build()
 
@@ -372,7 +374,12 @@ class TransformerEncoder(BaseEncoder):
             "max_norm":1.0 if self._norm_digit_embeddings else None,
             "padding_idx":0 if self._ignore_trailing_zero_digits else None
         }
-        self._emb_layer = nn.Embedding(**cfg_emb_layer)
+        if self._embedding_layer_type == "default":
+            self._emb_layer = PositionAwareEmbedding(n_seq_len=None, **cfg_emb_layer)
+        elif self._embedding_layer_type == "position_aware":
+            self._emb_layer = PositionAwareEmbedding(n_seq_len=self._n_digits, **cfg_emb_layer)
+        else:
+            raise AssertionError(f"unknown `embedding_layer_type` value: {self._embedding_layer_type}")
 
         # positional encodings
         cfg_pe_layer = {
@@ -412,19 +419,20 @@ class TransformerEncoder(BaseEncoder):
         self._decoder = nn.TransformerDecoder(decoder_layer, num_layers=self._num_decoder_layers, norm=norm)
 
         # logits layer
-        if self._logit_function_type == "default":
+        if self._logit_layer_type == "default":
             self._softmax_logit_layer = nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary)
-        elif self._logit_function_type == "position_aware":
+        elif self._logit_layer_type == "position_aware":
             lst_layers = [nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary) for _ in range(self._n_digits)]
             self._softmax_logit_layer = nn.ModuleList(lst_layers)
         else:
-            raise AssertionError(f"unknown `logit_function_type` value: {self._logit_function_type}")
+            raise AssertionError(f"unknown `logit_function_type` value: {self._logit_layer_type}")
 
         self._init_weights()
 
     def _init_weights(self):
         initrange = 0.1
-        nn.init.uniform_(self._emb_layer.weight, -initrange, initrange)
+        self._emb_layer.init_weights(-initrange, initrange)
+
         if isinstance(self._softmax_logit_layer, nn.ModuleList):
             for layer in self._softmax_logit_layer:
                 nn.init.zeros_(layer.weight)
@@ -526,6 +534,7 @@ class TransformerEncoder(BaseEncoder):
         """
 
         n_digits = min(self._n_digits, input_sequence.shape[-1])
+
         # compute target embeddings: (n_batch, n_digits, n_dim_emb)
         t_emb = self._emb_layer.forward(input_sequence) * math.sqrt(self._n_dim_hidden)
         tgt = self._pe_layer.forward(t_emb)
@@ -555,9 +564,9 @@ class TransformerEncoder(BaseEncoder):
 
         # compute Pr{Y_d|y_{<d}}
         # lst_code_probs: List[tensor(n_batch, n_ary)]
-        if self._logit_function_type == "default":
+        if self._logit_layer_type == "default":
             lst_logits = [self._softmax_logit_layer(h_out[:,idx_d,:]) for idx_d in range(n_digits)]
-        elif self._logit_function_type == "position_aware":
+        elif self._logit_layer_type == "position_aware":
             lst_logits = [self._softmax_logit_layer[idx_d](h_out[:,idx_d,:]) for idx_d in range(n_digits)]
         lst_code_probs = [F.softmax(logits, dim=-1) for logits in lst_logits]
 
@@ -705,7 +714,8 @@ class TransformerEncoder(BaseEncoder):
             "memory_encoder_input_feature": self._memory_encoder_input_feature,
             "pos_tagset": self._pos_tagset,
             "layer_normalization": self._layer_normalization,
-            "logit_function_type": self._logit_function_type
+            "logit_layer_type": self._logit_layer_type,
+            "embedding_layer_type": self._embedding_layer_type
             # "n_digits": self.n_digits,
             # "n_ary": self.n_ary
         }
