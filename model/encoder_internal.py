@@ -11,6 +11,86 @@ from torch import nn
 import math
 
 
+class AdditiveCodeAwareLogits(torch.nn.Module):
+
+    def __init__(self, n_digits: int, n_ary_in: int, n_ary_out: int, n_dim_emb: int, **kwargs):
+
+        super().__init__()
+        self._n_digits = n_digits
+        self._n_ary_in = n_ary_in
+        self._n_ary_out = n_ary_out
+        self._n_dim_emb = n_dim_emb
+
+        cfg_base_weight_layer = {
+            "num_embeddings": n_ary_in,
+            "embedding_dim": n_ary_out * n_dim_emb
+        }
+        cfg_base_weight_layer.update(kwargs)
+
+        # base_weight_layers: (n_digit, n_ary_in, n_ary_out * n_dim)
+        lst_base_weight_layers = [nn.Embedding(**cfg_base_weight_layer) for _ in range(n_digits)]
+        self.base_weight_layers = nn.ModuleList(lst_base_weight_layers)
+
+        # offset_weights: (n_digit, n_ary_out * n_dim)
+        self.offset_weights = nn.Parameter(torch.zeros(size=(n_digits, n_ary_out*n_dim_emb)), requires_grad=True)
+
+        self.init_weights()
+
+    def init_weights(self):
+        for layer in self.base_weight_layers:
+            nn.init.zeros_(layer.weight)
+
+    def forward(self, input_sequence: torch.Tensor, t_representation: torch.Tensor):
+        # input_sequence: (n_batch, n_digits_so_far) input_sequence[b,d] \in {0,n_ary_in}
+        # t_representation: (n_batch, n_digits_so_far, n_dim)
+
+        n_digits_so_far = min(self._n_digits, input_sequence.shape[-1])
+        lst_base_weights = [self.base_weight_layers[digit](input_sequence[:,digit]) for digit in range(n_digits_so_far)]
+        # t_base_weight: (n_batch, n_digits_so_far, n_ary_out * n_dim)
+        t_base_weight = torch.stack(lst_base_weights, dim=1)
+        t_weight_ = torch.cumsum(t_base_weight, dim=1) + self.offset_weights[:n_digits_so_far, :]
+        # t_weight: (n_batch, n_digits_so_far, n_ary_out, n_dim)
+        t_weight = t_weight_.view((-1, n_digits_so_far, self._n_ary_out, self._n_dim_emb))
+        # t_logits: (n_batch, n_digits_so_far, n_ary_out)
+        t_logits = torch.matmul(t_weight, t_representation.unsqueeze(-1)).squeeze(-1)
+
+        return t_logits
+
+
+class PositionAwareLogits(torch.nn.Module):
+
+    def __init__(self, n_seq_len: int = None, **kwargs):
+
+        super().__init__()
+        if isinstance(n_seq_len, int):
+            lst_layers = [nn.Linear(**kwargs) for _ in range(n_seq_len)]
+            self.linear_layers = nn.ModuleList(lst_layers)
+        else:
+            self.linear_layers = nn.Linear(**kwargs)
+        self.n_seq_len = n_seq_len
+
+        self.init_weights()
+
+    def init_weights(self):
+        if isinstance(self.linear_layers, nn.ModuleList):
+            for layer in self.linear_layers:
+                nn.init.zeros_(layer.weight)
+        else:
+            nn.init.zeros_(self.linear_layers.weight)
+
+    def forward(self, t_representation: torch.Tensor, **kwargs) -> torch.Tensor:
+        # t_representation: (n_batch, n_digits_so_far, n_dim)
+        assert t_representation.ndim == 3, f"unexpected dimension size: {t_representation.ndim}"
+        if isinstance(self.linear_layers, nn.ModuleList):
+            n_digits = t_representation.shape[1]
+            lst_t_logits = [self.linear_layers[digit](t_representation[:,digit,:]) for digit in range(n_digits)]
+            t_logits = torch.stack(lst_t_logits, dim=1)
+        else:
+            t_logits = self.linear_layers.forward(t_representation)
+        # t_logits: (n_batch, n_digits_so_far, n_ary)
+        return t_logits
+
+
 class PositionAwareEmbedding(torch.nn.Module):
 
     def __init__(self, n_seq_len: int = None, **kwargs):

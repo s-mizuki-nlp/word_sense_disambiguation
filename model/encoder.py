@@ -10,9 +10,9 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
 
-from .loss_unsupervised import CodeValueMutualInformationLoss
 from .onmt.global_attention import GlobalAttention
-from .encoder_internal import PositionAwareEmbedding, PositionalEncoding
+from .encoder_internal import \
+    PositionAwareEmbedding, PositionAwareLogits, PositionalEncoding, AdditiveCodeAwareLogits
 
 class BaseEncoder(nn.Module):
 
@@ -420,12 +420,18 @@ class TransformerEncoder(BaseEncoder):
 
         # logits layer
         if self._logit_layer_type == "default":
-            self._softmax_logit_layer = nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary)
+            self._softmax_logit_layer = PositionAwareLogits(n_seq_len=None, in_features=self._n_dim_hidden, out_features=self._n_ary)
         elif self._logit_layer_type == "position_aware":
-            lst_layers = [nn.Linear(in_features=self._n_dim_hidden, out_features=self._n_ary) for _ in range(self._n_digits)]
-            self._softmax_logit_layer = nn.ModuleList(lst_layers)
+            self._softmax_logit_layer = PositionAwareLogits(n_seq_len=self._n_digits, in_features=self._n_dim_hidden, out_features=self._n_ary)
+        elif self._logit_layer_type == "additive":
+            self._softmax_logit_layer = AdditiveCodeAwareLogits(n_digits=self._n_digits,
+                                                                n_ary_in=self._n_ary + len(self._pos_tagset),
+                                                                n_ary_out=self._n_ary,
+                                                                n_dim_emb=self._n_dim_hidden,
+                                                                max_norm=cfg_emb_layer["max_norm"],
+                                                                padding_idx=cfg_emb_layer["padding_idx"])
         else:
-            raise AssertionError(f"unknown `logit_function_type` value: {self._logit_layer_type}")
+            raise AssertionError(f"unknown `logit_layer_type` value: {self._logit_layer_type}")
 
         self._init_weights()
 
@@ -433,11 +439,7 @@ class TransformerEncoder(BaseEncoder):
         initrange = 0.1
         self._emb_layer.init_weights(-initrange, initrange)
 
-        if isinstance(self._softmax_logit_layer, nn.ModuleList):
-            for layer in self._softmax_logit_layer:
-                nn.init.zeros_(layer.weight)
-        else:
-            nn.init.zeros_(self._softmax_logit_layer.weight)
+        self._softmax_logit_layer.init_weights()
 
     def create_sequence_inputs(self, lst_pos: List[str], device,
                                ground_truth_synset_codes: Optional[Union[List[List[int]], torch.Tensor]] = None) -> torch.Tensor:
@@ -563,23 +565,21 @@ class TransformerEncoder(BaseEncoder):
             h_out = h_out.swapaxes(0, 1)
 
         # compute Pr{Y_d|y_{<d}}
-        # lst_code_probs: List[tensor(n_batch, n_ary)]
-        if self._logit_layer_type == "default":
-            lst_logits = [self._softmax_logit_layer(h_out[:,idx_d,:]) for idx_d in range(n_digits)]
-        elif self._logit_layer_type == "position_aware":
-            lst_logits = [self._softmax_logit_layer[idx_d](h_out[:,idx_d,:]) for idx_d in range(n_digits)]
-        lst_code_probs = [F.softmax(logits, dim=-1) for logits in lst_logits]
+        # t_code_probs: (n_batch, n_digits, n_ary)
+        if self._logit_layer_type in ("default", "position_aware"):
+            t_logits = self._softmax_logit_layer(t_representation=h_out)
+        elif self._logit_layer_type == "additive":
+            t_logits = self._softmax_logit_layer(t_representation=h_out, input_sequence=input_sequence)
+        t_code_prob = F.softmax(t_logits, dim=-1)
 
         # adjust Pr{c_d=d|c_{<d}} so that Pr{c_d=0|c_{<d+1}} satisfies monotone increasing condition.
         if self._prob_zero_monotone_increasing:
+            lst_t_code_prob = [t_prob for t_prob in t_code_prob.swapaxes(0,1)]
             for d in range(n_digits):
-                prob_c_prev = lst_code_probs[d-1] if d > 0 else None
-                t_prob_c_d = lst_code_probs[d]
-                lst_code_probs[d] = self._adjust_code_probability_to_monotone_increasing(probs=t_prob_c_d, probs_prev=prob_c_prev)
-
-        # stack all digits
-        # t_code_prob: (n_batch, n_digits, n_ary)
-        t_code_prob = torch.stack(lst_code_probs, dim=1)
+                prob_d_prev = lst_t_code_prob[d-1] if d > 0 else None
+                prob_d = lst_t_code_prob[d]
+                lst_t_code_prob[d] = self._adjust_code_probability_to_monotone_increasing(probs=prob_d, probs_prev=prob_d_prev)
+            t_code_prob = torch.stack(lst_t_code_prob, dim=1)
 
         # we never apply stochastic sampling because transformer does not accept student forcing.
         t_latent_code = t_code_prob
