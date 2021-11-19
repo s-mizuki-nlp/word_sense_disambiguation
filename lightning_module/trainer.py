@@ -29,17 +29,12 @@ class SenseCodeTrainer(LightningModule):
     def __init__(self,
                  model: HierarchicalCodeEncoder,
                  loss_supervised: Union[HyponymyScoreLoss, EntailmentProbabilityLoss, CrossEntropyLossWrapper],
-                 learning_rate: float = 5E-6,
-                 optimizer_class_name: str = "RAdam",
-                 use_sampled_code_repr_for_loss_computation: bool = False,
+                 optimizer_params: Dict[str, Any],
                  model_parameter_schedulers: Optional[Dict[str, Callable[[float], float]]] = None,
                  loss_parameter_schedulers: Optional[Dict[str, Callable[[float], float]]] = None,
-                 optimizer_params: Optional[Dict[str, Any]] = None
                  ):
 
         super().__init__()
-
-        self._use_sampled_code_repr_for_loss_computation = use_sampled_code_repr_for_loss_computation
 
         self._loss_supervised = loss_supervised
         self._scale_loss_supervised = loss_supervised.scale
@@ -53,9 +48,8 @@ class SenseCodeTrainer(LightningModule):
         hparams = {"n_ary":model.n_ary, "n_digits":model.n_digits, "encoder.n_dim_hidden":model.n_dim_hidden}
         self.save_hyperparameters(hparams)
 
-        self._learning_rate = learning_rate
-        self._optimizer_class_name = optimizer_class_name
-        self._optimizer_params = {} if optimizer_params is None else optimizer_params
+        self._optimizer_class_name = optimizer_params.pop("class_name")
+        self._optimizer_params = optimizer_params
         # auxiliary function that is solely used for validation
         self._aux_hyponymy_score = HyponymyScoreLoss()
         self._aux_cross_entropy = CrossEntropyLossWrapper()
@@ -79,20 +73,20 @@ class SenseCodeTrainer(LightningModule):
 
     def configure_optimizers(self):
         if self._optimizer_class_name == "Adam":
-            opt = Adam(self.parameters(), lr=self._learning_rate, **self._optimizer_params)
+            opt = Adam(self.parameters(), **self._optimizer_params)
         elif self._optimizer_class_name == "RAdam":
-            opt = RAdam(self.parameters(), lr=self._learning_rate, **self._optimizer_params)
+            opt = RAdam(self.parameters(), **self._optimizer_params)
         else:
             _optimizer_class = getattr(optim, self._optimizer_class_name)
-            opt = _optimizer_class(params=self.parameters(), lr=self._learning_rate, **self._optimizer_params)
+            opt = _optimizer_class(params=self.parameters(), **self._optimizer_params)
         return opt
 
     @property
     def metrics(self) -> Dict[str, str]:
         map_metric_to_validation = {
-            "hp/common_prefix_length":"val_soft_cpl",
+            "hp/common_prefix_length":"val_cond_cpl",
             "hp/cross_entropy":"val_cross_entropy",
-            "hp/relative_common_prefix_length":"val_soft_cpl_vs_gt_ratio",
+            "hp/relative_common_prefix_length":"val_cond_cpl_vs_gt_ratio",
             "hp/inclusion_probs":"val_code_inclusion_probability"
         }
         return map_metric_to_validation
