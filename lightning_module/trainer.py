@@ -215,10 +215,13 @@ class SenseCodeTrainer(LightningModule):
         t_codes, t_code_probs = self._model.forward(**batch)
 
         # choose the representation which is used for loss computation
-        if self._use_sampled_code_repr_for_loss_computation:
-            code_repr = t_codes
-        else:
+        if self._model.teacher_forcing:
             code_repr = t_code_probs
+        else:
+            if self._model.has_discretizer:
+                code_repr = t_codes
+            else:
+                code_repr = t_code_probs
 
         # (required) supervised loss
         loss_supervised = self._loss_supervised.forward(target_codes=batch["ground_truth_synset_codes"], input_code_probabilities=code_repr)
@@ -232,51 +235,59 @@ class SenseCodeTrainer(LightningModule):
         self.log_dict(dict_losses)
         return loss
 
-    def evaluate_metrics(self, target_codes: torch.Tensor, predicted_code_probs: torch.Tensor, predicted_codes: Optional[torch.Tensor] = None, eps: float = 1E-15):
+    def evaluate_metrics(self, target_codes: torch.Tensor, conditional_code_probs: torch.Tensor, generated_codes: Optional[torch.Tensor] = None, eps: float = 1E-15):
+        """
+
+        @param target_codes: (n_batch, n_digits). ground-truth sense codes.
+        @param conditional_code_probs: (n_batch, n_digits, n_ary). conditional probability. Pr(Y_d|y_{<d})
+        @param generated_codes: (n_batch, n_digits). generated sense code (using greedy decoding).
+        @param eps:
+        @return:
+        """
         # one-hot encoding without smoothing
         n_ary = self._model.n_ary
         t_code_probs_gt = self._aux_hyponymy_score._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=0.0)
 
         # code lengths
         t_code_length_gt = (target_codes != 0).sum(axis=-1).type(torch.float)
-        t_soft_code_length_pred = self._aux_hyponymy_score.calc_soft_code_length(predicted_code_probs)
+        t_soft_code_length_pred = self._aux_hyponymy_score.calc_soft_code_length(conditional_code_probs)
 
-        # common prefix lengths
-        t_soft_cpl = self._aux_hyponymy_score.calc_soft_lowest_common_ancestor_length(t_prob_c_x=t_code_probs_gt, t_prob_c_y=predicted_code_probs)
-        t_lca_vs_gt_ratio = t_soft_cpl / t_code_length_gt
+        # common prefix lengths using conditional probability
+        t_cond_cpl = self._aux_hyponymy_score.calc_soft_lowest_common_ancestor_length(t_prob_c_x=t_code_probs_gt, t_prob_c_y=conditional_code_probs)
+        t_lca_vs_gt_ratio = t_cond_cpl / t_code_length_gt
         t_pred_vs_gt_ratio = t_soft_code_length_pred / t_code_length_gt
 
-        # hard common prefix lengths
-        if predicted_codes is not None:
-            if predicted_codes.ndim == 3:
-                t_code_pred = predicted_codes.argmax(dim=-1)
+        # common prefix lengths using generated codes
+        if generated_codes is not None:
+            if generated_codes.ndim == 3:
+                t_code_pred = generated_codes.argmax(dim=-1)
             else:
-                t_code_pred = predicted_codes
-            t_hard_cpl_batch = self._aux_hyponymy_score.calc_hard_common_ancestor_length(t_code_gt=target_codes, t_code_pred=t_code_pred)
-            t_hard_cpl = torch.mean(t_hard_cpl_batch)
+                t_code_pred = generated_codes
+            t_gen_cpl_batch = self._aux_hyponymy_score.calc_hard_common_ancestor_length(t_code_gt=target_codes, t_code_pred=t_code_pred)
+            t_gen_cpl = torch.mean(t_gen_cpl_batch)
         else:
-            t_hard_cpl = None
+            t_gen_cpl = None
 
         # entailment probability
-        t_prob_entail = self._aux_hyponymy_score.calc_ancestor_probability(t_prob_c_x=t_code_probs_gt, t_prob_c_y=predicted_code_probs)
-        t_prob_synonym = self._aux_hyponymy_score.calc_synonym_probability(t_prob_c_x=t_code_probs_gt, t_prob_c_y=predicted_code_probs)
+        t_prob_entail = self._aux_hyponymy_score.calc_ancestor_probability(t_prob_c_x=t_code_probs_gt, t_prob_c_y=conditional_code_probs)
+        t_prob_synonym = self._aux_hyponymy_score.calc_synonym_probability(t_prob_c_x=t_code_probs_gt, t_prob_c_y=conditional_code_probs)
         t_prob_inclusion = t_prob_synonym + t_prob_entail
 
         # cross entropy
-        t_cross_entropy = self._aux_cross_entropy.forward(input_code_probabilities=predicted_code_probs, target_codes=target_codes)
+        t_cross_entropy = self._aux_cross_entropy.forward(input_code_probabilities=conditional_code_probs, target_codes=target_codes)
 
         # code diversity
-        code_probability_divergence = torch.mean(np.log(n_ary) + torch.sum(predicted_code_probs * torch.log(predicted_code_probs + eps), axis=-1), axis=-1)
+        code_probability_divergence = torch.mean(np.log(n_ary) + torch.sum(conditional_code_probs * torch.log(conditional_code_probs + eps), axis=-1), axis=-1)
 
         metrics = {
             "val_cross_entropy":t_cross_entropy,
-            "val_hard_cpl":t_hard_cpl,
-            "val_soft_cpl":torch.mean(t_soft_cpl),
-            "val_soft_cpl_vs_gt_ratio":torch.mean(t_lca_vs_gt_ratio),
-            "val_soft_code_length_mean":torch.mean(t_soft_code_length_pred),
+            "val_gen_cpl":t_gen_cpl,
+            "val_cond_cpl":torch.mean(t_cond_cpl),
+            "val_cond_cpl_vs_gt_ratio":torch.mean(t_lca_vs_gt_ratio),
+            "val_code_length_mean":torch.mean(t_soft_code_length_pred),
             "val_code_inclusion_probability":torch.mean(t_prob_inclusion),
-            "val_soft_code_length_std":torch.std(t_soft_code_length_pred),
-            "val_soft_code_length_pred_vs_gt_ratio":torch.mean(t_pred_vs_gt_ratio),
+            "val_code_length_std":torch.std(t_soft_code_length_pred),
+            "val_code_length_pred_vs_gt_ratio":torch.mean(t_pred_vs_gt_ratio),
             "val_code_probability_divergence":torch.mean(code_probability_divergence)
         }
         return metrics
@@ -285,18 +296,13 @@ class SenseCodeTrainer(LightningModule):
 
         # forward computation without back-propagation
         t_target_codes = batch["ground_truth_synset_codes"]
-        # continuous relaxation of previous tokens
-        t_codes, t_code_probs = self._model._predict(**batch)
-        # one-hot repr. of previous tokens
-        t_codes_greedy, t_code_probs_greedy = self._model._predict(**batch, apply_argmax_on_inference=True)
-
-        if self._use_sampled_code_repr_for_loss_computation:
-            code_repr = t_codes
-        else:
-            code_repr = t_code_probs
+        # conditional probability
+        _, t_code_probs = self._model._predict(**batch)
+        # sense code generation and its probability
+        t_codes_greedy, t_code_probs_greedy = self._model._encode(**batch)
 
         # (required) supervised loss
-        loss_supervised = self._loss_supervised.forward(target_codes=t_target_codes, input_code_probabilities=code_repr)
+        loss_supervised = self._loss_supervised.forward(target_codes=t_target_codes, input_code_probabilities=t_code_probs)
 
         loss = loss_supervised
 
@@ -306,13 +312,8 @@ class SenseCodeTrainer(LightningModule):
 
         # analysis metrics
         ## based on continuous relaxation
-        metrics_repr = self.evaluate_metrics(target_codes=t_target_codes, predicted_code_probs=t_code_probs, predicted_codes=t_codes)
+        metrics_repr = self.evaluate_metrics(target_codes=t_target_codes, conditional_code_probs=t_code_probs, generated_codes=t_codes_greedy)
         metrics.update(metrics_repr)
-        ## based on one-hot representation (=greedy decoding)
-        metrics_repr_greedy = self.evaluate_metrics(target_codes=t_target_codes,
-                                                    predicted_code_probs=t_code_probs_greedy, predicted_codes=t_codes_greedy)
-        metrics["val_hard_cpl_greedy"] = metrics_repr_greedy["val_hard_cpl"]
-        metrics["val_soft_cpl_greedy"] = metrics_repr_greedy["val_soft_cpl"]
 
         self.log_dict(metrics)
 
