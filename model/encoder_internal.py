@@ -62,7 +62,8 @@ class AdditiveCodeAwareLogits(torch.nn.Module):
 
             shp[dim] = _stride
             pad = torch.zeros(shp, dtype=tensor.dtype).to(tensor.device)
-            t_ragged = torch.index_select(t_, dim=dim, index=torch.arange(end=length - _stride))
+            index = torch.arange(end=length - _stride).to(tensor.device)
+            t_ragged = torch.index_select(t_, dim=dim, index=index)
 
             t_cumsum = t_ - torch.cat((pad, t_ragged), dim=dim)
 
