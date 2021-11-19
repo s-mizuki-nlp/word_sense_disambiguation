@@ -68,10 +68,12 @@ class LemmaDataset(NDJSONDataset, Dataset):
         return result
 
     def _setup_lexical_knowledge_on_synset_id(self) -> Dict[str, Dict[str, List[str]]]:
-        result = defaultdict(lambda : defaultdict(list))
+        result = {}
         for record in self:
             lemma = record["lemma"]
             for lemma_key, synset_id in record["lemma_keys"].items():
+                if synset_id not in result:
+                    result[synset_id] = defaultdict(list)
                 result[synset_id]["lemmas"].append(lemma)
                 result[synset_id]["lemma_keys"].append(lemma_key)
         return result
@@ -122,15 +124,19 @@ class LemmaDataset(NDJSONDataset, Dataset):
     @property
     def synset_code_n_digits(self):
         if not hasattr(self, "_synset_code_n_digits"):
+            def _apply_function(it_lst_codes):
+                return max([max(map(len, lst_codes)) for lst_codes in it_lst_codes])
             self._synset_code_n_digits = self._apply(apply_field_name="synset_codes", disable_transform_functions=False,
-                           apply_function=lambda it_lst_codes: max([max(map(len, lst_codes)) for lst_codes in it_lst_codes]))
+                           apply_function=_apply_function)
         return self._synset_code_n_digits
 
     @property
     def synset_code_n_ary(self):
         if not hasattr(self, "_synset_code_n_ary"):
+            def _apply_function(it_lst_codes):
+                return max([max(map(max, lst_codes)) for lst_codes in it_lst_codes]) + 1
             self._synset_code_n_ary = self._apply(apply_field_name="synset_codes", disable_transform_functions=False,
-                           apply_function=lambda it_lst_codes: max([max(map(max, lst_codes)) for lst_codes in it_lst_codes]) + 1)
+                           apply_function=_apply_function)
         return self._synset_code_n_ary
 
     @property
