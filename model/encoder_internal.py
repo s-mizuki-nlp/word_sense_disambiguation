@@ -5,6 +5,8 @@ from __future__ import unicode_literals
 from __future__ import division
 from __future__ import print_function
 
+from typing import Optional
+
 import warnings
 import torch
 from torch import nn
@@ -13,13 +15,18 @@ import math
 
 class AdditiveCodeAwareLogits(torch.nn.Module):
 
-    def __init__(self, n_digits: int, n_ary_in: int, n_ary_out: int, n_dim_emb: int, **kwargs):
+    def __init__(self, n_digits: int, n_ary_in: int, n_ary_out: int, n_dim_emb: int,
+                 bias: bool = True,
+                 depends_on_previous_digits: Optional[int] = None,
+                 **kwargs):
 
         super().__init__()
         self._n_digits = n_digits
         self._n_ary_in = n_ary_in
         self._n_ary_out = n_ary_out
         self._n_dim_emb = n_dim_emb
+        self._bias = bias
+        self._depends_on_previous_digits = depends_on_previous_digits
 
         cfg_base_weight_layer = {
             "num_embeddings": n_ary_in,
@@ -32,13 +39,34 @@ class AdditiveCodeAwareLogits(torch.nn.Module):
         self.base_weight_layers = nn.ModuleList(lst_base_weight_layers)
 
         # offset_weights: (n_digit, n_ary_out * n_dim)
-        self.offset_weights = nn.Parameter(torch.zeros(size=(n_digits, n_ary_out*n_dim_emb)), requires_grad=True)
+        if bias:
+            self.bias_weights = nn.Parameter(torch.zeros(size=(n_digits, n_ary_out * n_dim_emb)), requires_grad=True)
 
         self.init_weights()
 
     def init_weights(self):
         for layer in self.base_weight_layers:
             nn.init.zeros_(layer.weight)
+
+    def _ragged_cumsum(self, tensor: torch.Tensor, dim: int, stride: Optional[int]):
+        if stride is None:
+            # t_cumsum[:,d,:] = tensor[:,:d+1,:].sum(dim=dim)
+            t_cumsum = torch.cumsum(tensor, dim=dim)
+        else:
+            # t_cumsum[:,d,:] = tensor[:,(d-stride):d+1,:].sum(dim=dim)
+            shp = list(tensor.shape)
+            length = shp[dim]
+
+            _stride = min(stride + 1, length)
+            t_ = torch.cumsum(tensor, dim=dim)
+
+            shp[dim] = _stride
+            pad = torch.zeros(shp, dtype=tensor.dtype).to(tensor.device)
+            t_ragged = torch.index_select(t_, dim=dim, index=torch.arange(end=length - _stride))
+
+            t_cumsum = t_ - torch.cat((pad, t_ragged), dim=dim)
+
+        return t_cumsum
 
     def forward(self, input_sequence: torch.Tensor, t_representation: torch.Tensor):
         # input_sequence: (n_batch, n_digits_so_far) input_sequence[b,d] \in {0,n_ary_in}
@@ -48,7 +76,12 @@ class AdditiveCodeAwareLogits(torch.nn.Module):
         lst_base_weights = [self.base_weight_layers[digit](input_sequence[:,digit]) for digit in range(n_digits_so_far)]
         # t_base_weight: (n_batch, n_digits_so_far, n_ary_out * n_dim)
         t_base_weight = torch.stack(lst_base_weights, dim=1)
-        t_weight_ = torch.cumsum(t_base_weight, dim=1) + self.offset_weights[:n_digits_so_far, :]
+        if self._depends_on_previous_digits is None:
+            t_weight_ = torch.cumsum(t_base_weight, dim=1)
+        else:
+            t_weight_ = self._ragged_cumsum(t_base_weight, dim=1, stride=min(self._depends_on_previous_digits, n_digits_so_far))
+        if self._bias:
+            t_weight_ = t_weight_ + self.bias_weights[:n_digits_so_far, :]
         # t_weight: (n_batch, n_digits_so_far, n_ary_out, n_dim)
         t_weight = t_weight_.view((-1, n_digits_so_far, self._n_ary_out, self._n_dim_emb))
         # t_logits: (n_batch, n_digits_so_far, n_ary_out)

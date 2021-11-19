@@ -357,6 +357,7 @@ class TransformerEncoder(BaseEncoder):
         self._prob_zero_monotone_increasing = prob_zero_monotone_increasing
         self._embedding_layer_type = embedding_layer_type
         self._logit_layer_type = logit_layer_type
+        self._kwargs = kwargs
 
         self._build()
 
@@ -428,6 +429,8 @@ class TransformerEncoder(BaseEncoder):
                                                                 n_ary_in=self._n_ary + len(self._pos_tagset),
                                                                 n_ary_out=self._n_ary,
                                                                 n_dim_emb=self._n_dim_hidden,
+                                                                bias=self._kwargs.get("bias", True),
+                                                                depends_on_previous_digits=self._kwargs.get("depends_on_previous_digits", None),
                                                                 max_norm=cfg_emb_layer["max_norm"],
                                                                 padding_idx=cfg_emb_layer["padding_idx"])
         else:
