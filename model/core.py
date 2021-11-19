@@ -165,10 +165,6 @@ class HierarchicalCodeEncoder(nn.Module):
                               subword_spans: List[List[List[int]]] = None,
                               on_inference: bool = False,
                               **kwargs):
-        # ground truth codes
-        if on_inference:
-            ground_truth_synset_codes = None
-
         t_latent_code, t_code_prob = self._encoder.forward(pos=pos,
                                                            entity_embeddings=entity_embeddings,
                                                            entity_sequence_mask=entity_sequence_mask,
@@ -242,17 +238,52 @@ class HierarchicalCodeEncoder(nn.Module):
         return kwargs
 
     def _predict(self, **kwargs):
-        kwargs["ground_truth_synset_codes"] = None
-        return self.forward(**kwargs, requires_grad=False, on_inference=True)
+        """
+        predict conditional probability and sense code. it takes both ground-truth synset code and postag into account.
+
+        @param kwargs:
+        @return: t_code: (n_batch, n_digits), t_code_prob: (n_batch, n_digits, n_ary)
+        """
+        assert kwargs.get("ground_truth_synset_codes",None) is not None, \
+            f"`ground_truth_synset_codes` is missing."
+        t_code, t_code_prob = self.forward(**kwargs, requires_grad=False, on_inference=True)
+        if t_code.ndim == 3:
+            t_code = t_code.argmax(dim=-1)
+        return t_code, t_code_prob
 
     def predict(self, **kwargs):
-        with ExitStack() as context_stack:
-            context_stack.enter_context(torch.no_grad())
-            kwargs = self._numpy_to_tensor_bulk(**kwargs)
-            t_latent_code, t_code_prob = self._predict(**kwargs)
-        return tuple(map(utils.tensor_to_numpy, (t_latent_code, t_code_prob)))
+        """
+        predict conditional probability and sense code. it takes both ground-truth synset code and postag into account.
+
+        @param kwargs:
+        @return: t_code: (n_batch, n_digits), t_code_prob: (n_batch, n_digits, n_ary)
+        """
+        kwargs = self._numpy_to_tensor_bulk(**kwargs)
+        t_code, t_code_prob = self._predict(**kwargs)
+        v_code, v_code_prob = tuple(map(utils.tensor_to_numpy, (t_code, t_code_prob)))
+        return v_code, v_code_prob
+
+    def _encode(self, **kwargs):
+        """
+        encode features into sense code. greedy decoding is applied. it ignores ground-truth synset codes but takes postag into account.
+
+        @param kwargs:
+        @return:
+        """
+        kwargs["ground_truth_synset_codes"] = None
+        t_code, t_code_prob = self.forward(**kwargs, requires_grad=False, on_inference=True, apply_argmax_on_inference=True)
+        if t_code.ndim == 3:
+            t_code = t_code.argmax(dim=-1)
+        return t_code, t_code_prob
 
     def encode(self, **kwargs):
-        v_latent_code, v_code_prob = self.predict(**kwargs)
-        v_code = np.argmax(v_code_prob, axis=-1)
-        return v_code
+        """
+        encode features into sense code. greedy decoding is applied. it ignores ground-truth synset codes but takes postag into account.
+
+        @param kwargs:
+        @return: t_code: (n_batch, n_digits), t_code_prob: (n_batch, n_digits, n_ary)
+        """
+        kwargs = self._numpy_to_tensor_bulk(**kwargs)
+        t_code, t_code_prob = self._encode(**kwargs)
+        v_code, v_code_prob = tuple(map(utils.tensor_to_numpy, (t_code, t_code_prob)))
+        return v_code, v_code_prob

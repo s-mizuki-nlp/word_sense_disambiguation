@@ -180,9 +180,12 @@ class LSTMEncoder(BaseEncoder):
         dtype, device = self._dtype_and_device(t)
         n_batch = t.shape[0]
 
-        if on_inference:
-            ground_truth_synset_codes = None
-        elif ground_truth_synset_codes is not None:
+        if on_inference and (ground_truth_synset_codes is None):
+            on_generation = True
+        else:
+            on_generation = False
+
+        if ground_truth_synset_codes is not None:
             ground_truth_synset_codes = F.one_hot(ground_truth_synset_codes, num_classes=self._n_ary).type(torch.float)
 
         # initialize variables
@@ -220,7 +223,7 @@ class LSTMEncoder(BaseEncoder):
                 t_prob_c_d = self._adjust_code_probability_to_monotone_increasing(probs=t_prob_c_d, probs_prev=prob_c_prev)
 
             # compute the relaxed code of current digit: c_d
-            if on_inference:
+            if on_generation:
                 if apply_argmax_on_inference:
                     t_latent_code_d = F.one_hot(t_prob_c_d.argmax(dim=-1), num_classes=self._n_ary).type(dtype)
                 else:
@@ -228,27 +231,22 @@ class LSTMEncoder(BaseEncoder):
                     # I guess it minimizes difference on training and inference.
                     t_latent_code_d = t_prob_c_d
             else:
-                ## on training -> stochastic sampling if discretizer is available.
-                if self.has_discretizer:
-                    t_latent_code_d = self._discretizer(t_prob_c_d)
+                if on_inference:
+                    ## on inference but not generation -> conditional probability Pr{Y_d|y_{<d}}
+                    t_latent_code_d = torch.index_select(ground_truth_synset_codes, dim=1, index=torch.tensor(d, device=device)).squeeze()
                 else:
-                    t_latent_code_d = t_prob_c_d
+                    ## on training -> stochastic sampling if discretizer is available.
+                    if self._teacher_forcing:
+                        t_latent_code_d = torch.index_select(ground_truth_synset_codes, dim=1, index=torch.tensor(d, device=device)).squeeze()
+                    elif self.has_discretizer:
+                        t_latent_code_d = self._discretizer(t_prob_c_d)
+                    else:
+                        t_latent_code_d = t_prob_c_d
 
             # compute the embeddings of previous code
             if d != (self._n_digits - 1):
-                if on_inference:
-                    o_d = t_latent_code_d.detach()
-                else:
-                    # on training
-                    if self._teacher_forcing:
-                        # teacher forcing
-                        # o_d = input_y[:, d, :]
-                        o_d = torch.index_select(ground_truth_synset_codes, dim=1, index=torch.tensor(d, device=device)).squeeze()
-                    else:
-                        # student forcing (detached previous output)
-                        o_d = t_latent_code_d.detach()
-
                 # calculate embeddings
+                o_d = t_latent_code_d.detach()
                 if self._code_embeddings_type == "time_distributed":
                     e_d = self._embedding_code(o_d)
                 elif self._code_embeddings_type == "time_dependent":
@@ -589,12 +587,12 @@ class TransformerEncoder(BaseEncoder):
 
         return t_latent_code, t_code_prob
 
-    def forward_inference_greedy(self, pos: List[str], entity_embeddings: torch.Tensor,
-                                 entity_sequence_mask: torch.Tensor,
-                                 context_embeddings: Optional[torch.Tensor] = None,
-                                 context_sequence_mask: Optional[torch.Tensor] = None,
-                                 subword_spans: List[List[List[int]]] = None,
-                                 **kwargs):
+    def forward_greedy_decoding(self, pos: List[str], entity_embeddings: torch.Tensor,
+                                entity_sequence_mask: torch.Tensor,
+                                context_embeddings: Optional[torch.Tensor] = None,
+                                context_sequence_mask: Optional[torch.Tensor] = None,
+                                subword_spans: List[List[List[int]]] = None,
+                                **kwargs):
         # decoding using greedy search
         # return: t_code_probs: (n_batch, n_digits, n_ary). t_code_probs[n,d] = Pr(Y|\hat{y_{<d}})
         # return: t_codes: (n_batch, n_digits). t_codes[n,d] = argmax_{a}{Pr(Y=a|\hat{y_{<d}})} = \hat{y_{d}}
@@ -630,26 +628,6 @@ class TransformerEncoder(BaseEncoder):
 
         return t_codes, t_code_probs
 
-    def forward_training(self, pos: List[str],
-                         entity_embeddings: torch.Tensor,
-                         entity_sequence_mask: torch.Tensor,
-                         ground_truth_synset_codes: torch.Tensor,
-                         context_embeddings: Optional[torch.Tensor] = None,
-                         context_sequence_mask: Optional[torch.Tensor] = None,
-                         subword_spans: List[List[List[int]]] = None,
-                         **kwargs):
-        dtype, device = self._dtype_and_device(entity_embeddings)
-        input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device,
-                                                     ground_truth_synset_codes=ground_truth_synset_codes)
-        return self.forward_base(input_sequence=input_sequence,
-                                 entity_embeddings=entity_embeddings,
-                                 entity_sequence_mask=entity_sequence_mask,
-                                 context_embeddings=context_embeddings,
-                                 context_sequence_mask=context_sequence_mask,
-                                 subword_spans=subword_spans,
-                                 apply_autoregressive_mask=True,
-                                 **kwargs)
-
     def forward(self, pos: List[str], entity_embeddings: torch.Tensor,
                 entity_sequence_mask: torch.Tensor,
                 context_embeddings: Optional[torch.Tensor] = None,
@@ -658,22 +636,35 @@ class TransformerEncoder(BaseEncoder):
                 subword_spans: List[List[List[int]]] = None,
                 on_inference: bool = False,
                 **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
-        if not on_inference:
-            return self.forward_training(pos=pos, entity_embeddings=entity_embeddings,
-                                         entity_sequence_mask=entity_sequence_mask,
-                                         context_embeddings=context_embeddings,
-                                         context_sequence_mask=context_sequence_mask,
-                                         ground_truth_synset_codes=ground_truth_synset_codes,
-                                         subword_spans=subword_spans,
-                                         **kwargs)
+
+        if on_inference and (ground_truth_synset_codes is None):
+            on_generation = True
         else:
-            return self.forward_inference_greedy(pos=pos,
-                                                 entity_embeddings=entity_embeddings,
-                                                 entity_sequence_mask=entity_sequence_mask,
-                                                 context_embeddings=context_embeddings,
-                                                 context_sequence_mask=context_sequence_mask,
-                                                 subword_spans=subword_spans,
-                                                 **kwargs)
+            on_generation = False
+
+        if on_generation:
+            # if ground-truth is not given, it generates sense code from scratch.
+            return self.forward_greedy_decoding(pos=pos,
+                                                entity_embeddings=entity_embeddings,
+                                                entity_sequence_mask=entity_sequence_mask,
+                                                context_embeddings=context_embeddings,
+                                                context_sequence_mask=context_sequence_mask,
+                                                subword_spans=subword_spans,
+                                                **kwargs)
+        else:
+            # if ground-truth is given, it computes conditional probability: Pr{Y_d|y_{<d}}
+            # regardless of on_inference is true or not.
+            dtype, device = self._dtype_and_device(entity_embeddings)
+            input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device,
+                                                         ground_truth_synset_codes=ground_truth_synset_codes)
+            return self.forward_base(input_sequence=input_sequence,
+                                       entity_embeddings=entity_embeddings,
+                                       entity_sequence_mask=entity_sequence_mask,
+                                       context_embeddings=context_embeddings,
+                                       context_sequence_mask=context_sequence_mask,
+                                       subword_spans=subword_spans,
+                                       apply_autoregressive_mask=True,
+                                       **kwargs)
 
     @property
     def has_discretizer(self):
