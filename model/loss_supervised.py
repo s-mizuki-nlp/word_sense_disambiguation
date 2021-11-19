@@ -38,15 +38,6 @@ class _SenseCodeBaseLoss(L._Loss):
     def scale(self):
         return 1.0
 
-    def _standardize(self, vec: torch.Tensor, dim=-1):
-        means = vec.mean(dim=dim, keepdim=True)
-        stds = vec.std(dim=dim, keepdim=True)
-        return (vec - means) / (stds + 1E-6)
-
-    def _scale_dynamic(self, vec: torch.Tensor, dim=-1):
-        stds = vec.std(dim=dim, keepdim=True)
-        return vec / (stds + 1E-6)
-
     def _mse(self, u, v) -> torch.Tensor:
         return F.mse_loss(u, v, reduction=self.reduction)
 
@@ -126,8 +117,38 @@ class _SenseCodeBaseLoss(L._Loss):
         t_log_length = torch.logsumexp(torch.log(t_at_n) + t_log_prob_break_nonzero, dim=-1)
         return t_log_length
 
-    def forward(self, *args, **kwargs):
-        pass
+    @staticmethod
+    def _manual_reduction(losses: torch.Tensor, reduction: str):
+        if reduction == "sum":
+            loss = torch.sum(losses)
+        elif reduction.endswith("mean"):
+            loss = torch.mean(losses)
+        elif reduction == "none":
+            loss = losses
+        return loss
+
+    def forward(self, u: torch.Tensor, v: torch.Tensor, weight: Optional[torch.Tensor] = None):
+        """
+        apply pre-specified distance function and reduction within mini-batch.
+
+        @param u: 1D tensor. (n_batch,)
+        @param v: 1D tensor. (n_batch,)
+        @param weight: Optional 1D tensor which is used for sample-wise weight. (n_batch, )
+        @return: loss value (scalar when 'reduction="mean"')
+        """
+        if weight is None:
+            return self._func_distance(u, v)
+        else:
+            n_sample = weight.shape[0]
+            # normalize weights
+            weight = n_sample * weight / (torch.sum(weight) + 1E-7)
+            # apply manual reduction
+            _reduction = self.reduction
+            self.reduction = "none"
+            losses = self._func_distance(u, v) * weight
+            loss = self._manual_reduction(losses, reduction=_reduction)
+            self.reduction = _reduction
+            return loss
 
 
 class HyponymyScoreLoss(_SenseCodeBaseLoss):
@@ -332,17 +353,24 @@ class HyponymyScoreLoss(_SenseCodeBaseLoss):
         # convert to one-hot encoding
         t_prob_c_x = self._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=self._label_smoothing_factor)
 
-        y_pred = self.calc_soft_hyponymy_score(t_prob_c_x, t_prob_c_y, log=self._log_scale)
+        y_pred = self.calc_soft_hyponymy_score(t_prob_c_gt=t_prob_c_x, t_prob_c_pred=t_prob_c_y, log=self._log_scale)
 
         y_true = torch.zeros_like(y_pred)
-        loss = self._func_distance(y_pred, y_true)
+        if self._weight_by_ground_truth_code_length:
+            # weights[b] = n_digits - code_length(target_codes[b])
+            l_ground_truth = self.calc_log_soft_code_length(t_prob_c_x)
+            weights = n_digits - l_ground_truth
+        else:
+            weights = None
+
+        loss = super().forward(y_pred, y_true, weights)
 
         return loss
 
 
 class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
-    def __init__(self, scale: float = 1.0,
+    def __init__(self,
                  entail_probability_weight: float = 1.0,
                  synonym_probability_weight: float = 0.0,
                  label_smoothing_factor: Optional[float] = None,
@@ -352,7 +380,6 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
         """
         compute entailment/synonymy proabbility-based loss between code probabilities and ground-truth codes.
 
-        @param scale: scaling coefficient of the total loss.
         @param synonym_probability_weight: relative weight of the synonymy class probs. DEFAULT: None (=0.0)
         @param label_smoothing_factor: smoothing factor of the one-hot encoding of ground-truth codes. DEFAULT: None (=disabled)
         @param size_average: deprecated.
@@ -362,7 +389,7 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
         @param focal_loss_gamma: hyper-paramer of focal loss weighting method.
         @param focal_loss_normalize_weight:
         """
-        super(EntailmentProbabilityLoss, self).__init__(scale=scale,
+        super(EntailmentProbabilityLoss, self).__init__(
                     distance_metric="binary-cross-entropy",
                     size_average=size_average, reduce=reduce, reduction=reduction)
         accepted_loss_metric = ("cross_entropy", "focal_loss", "dice_loss")
@@ -452,16 +479,9 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
         # compute loss using various sample-wise weighting methods (e.g., focal loss)
         losses = self._compute_loss(y_log_probs, log=True)
+        loss = self._manual_reduction(losses, reduction=self.reduction)
 
-        # reduction
-        if self.reduction == "sum":
-            loss = torch.sum(losses)
-        elif self.reduction.endswith("mean"):
-            loss = torch.mean(losses)
-        elif self.reduction == "none":
-            loss = losses
-
-        return loss * self._scale
+        return loss
 
 
 class CrossEntropyLossWrapper(L.CrossEntropyLoss):
