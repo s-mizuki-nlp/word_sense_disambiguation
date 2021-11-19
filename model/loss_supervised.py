@@ -8,39 +8,22 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.modules import loss as L
 
-class CodeLengthPredictionLoss(L._Loss):
+class _SenseCodeBaseLoss(L._Loss):
 
-    def __init__(self, scale: float = 1.0, normalize_code_length: bool = False,
-                 distance_metric: str = "scaled-mse",
+    def __init__(self, distance_metric: str,
                  size_average=None, reduce=None, reduction='mean'):
 
-        super(CodeLengthPredictionLoss, self).__init__(size_average, reduce, reduction)
-
-        self._scale = scale
-        self._normalize_code_length = normalize_code_length
+        super(_SenseCodeBaseLoss, self).__init__(size_average, reduce, reduction)
 
         self._distance_metric = distance_metric
         if distance_metric == "mse":
             self._func_distance = self._mse
-        elif distance_metric == "scaled-mse":
-            self._func_distance = self._scaled_mse
-        elif distance_metric == "standardized-mse":
-            self._func_distance = self._standardized_mse
-        elif distance_metric == "autoscaled-mse":
-            self._func_distance = self._auto_scaled_mse
-        elif distance_metric == "positive-autoscaled-mse":
-            self._func_distance = self._positive_auto_scaled_mse
-        elif distance_metric == "weighted-mse":
-            self._func_distance = self._weighted_mse
-            self._m = nn.BatchNorm1d(1)
+        elif distance_metric == "focal-mse":
+            self._func_distance = self._focal_mse
         elif distance_metric == "mae":
             self._func_distance = self._mae
-        elif distance_metric == "weighted-mae":
-            self._func_distance = self._mae
-        elif distance_metric == "scaled-mae":
-            self._func_distance = self._scaled_mae
-        elif distance_metric == "cosine":
-            self._func_distance = self._cosine_distance
+        elif distance_metric == "focal-mae":
+            self._func_distance = self._focal_mae
         elif distance_metric == "hinge":
             self._func_distance = self._hinge_distance
         elif distance_metric == "binary-cross-entropy":
@@ -53,11 +36,7 @@ class CodeLengthPredictionLoss(L._Loss):
 
     @property
     def scale(self):
-        return self._scale
-
-    @scale.setter
-    def scale(self, value):
-        self._scale = value
+        return 1.0
 
     def _standardize(self, vec: torch.Tensor, dim=-1):
         means = vec.mean(dim=dim, keepdim=True)
@@ -71,7 +50,7 @@ class CodeLengthPredictionLoss(L._Loss):
     def _mse(self, u, v) -> torch.Tensor:
         return F.mse_loss(u, v, reduction=self.reduction)
 
-    def _weighted_mse(self, u, v) -> torch.Tensor:
+    def _focal_mse(self, u, v) -> torch.Tensor:
         errors = (u - v)**2
         weights = errors / (errors.sum() + 1E-7)
         losses = weights * errors
@@ -82,31 +61,10 @@ class CodeLengthPredictionLoss(L._Loss):
         elif self.reduction == "none":
             return losses
 
-    def _scaled_mse(self, u, v) -> torch.Tensor:
-        return F.mse_loss(self._scale_dynamic(u), self._scale_dynamic(v), reduction=self.reduction)
-
-    def _standardized_mse(self, u, v) -> torch.Tensor:
-        return F.mse_loss(self._standardize(u), self._standardize(v), reduction=self.reduction)
-
-    def _auto_scaled_mse(self, u, v) -> torch.Tensor:
-        # assume u and y is predicted and ground-truth values, respectively.
-        scale = torch.sum(u.detach()*v.detach()) / (torch.sum(u.detach()**2)+1E-6)
-        if scale > 0:
-            loss = F.mse_loss(scale*u, v, reduction=self.reduction)
-        else:
-            loss = self._scaled_mse(u, v)
-        return loss
-
-    def _positive_auto_scaled_mse(self, u, v) -> torch.Tensor:
-        # assume u and y is predicted and ground-truth values, respectively.
-        scale = max(1.0, torch.sum(u.detach()*v.detach()) / (torch.sum(u.detach()**2)+1E-6))
-        loss = F.mse_loss(scale*u, v, reduction=self.reduction)
-        return loss
-
     def _mae(self, u, v) -> torch.Tensor:
         return F.l1_loss(u, v, reduction=self.reduction)
 
-    def _weighted_mae(self, u, v) -> torch.Tensor:
+    def _focal_mae(self, u, v) -> torch.Tensor:
         errors = torch.abs(u - v)
         weights = errors / (errors.sum() + 1E-7)
         losses = weights * errors
@@ -116,12 +74,6 @@ class CodeLengthPredictionLoss(L._Loss):
             return torch.sum(losses)
         elif self.reduction == "none":
             return losses
-
-    def _scaled_mae(self, u, v) -> torch.Tensor:
-        return F.l1_loss(self._scale_dynamic(u), self._scale_dynamic(v), reduction=self.reduction)
-
-    def _cosine_distance(self, u, v, dim=0, eps=1e-8) -> torch.Tensor:
-        return 1.0 - F.cosine_similarity(u, v, dim, eps)
 
     def _hinge_distance(self, y_pred, y_true) -> torch.Tensor:
         hinge_loss = F.relu(y_pred - y_true)
@@ -174,50 +126,21 @@ class CodeLengthPredictionLoss(L._Loss):
         t_log_length = torch.logsumexp(torch.log(t_at_n) + t_log_prob_break_nonzero, dim=-1)
         return t_log_length
 
-    def forward(self, t_prob_c_batch: torch.Tensor, lst_code_length_tuple: List[Tuple[int, float]]) -> torch.Tensor:
-        """
-        evaluates L2 loss of the predicted code length and true code length in a normalized scale.
-
-        :param t_prob_c_batch: probability array of p(c_n=m|x); (n_batch, n_digits, n_ary)
-        :param lst_hyponymy_tuple: list of (entity index, entity depth) tuples
-        """
-
-        # x: hypernym, y: hyponym
-        dtype, device = self._dtype_and_device(t_prob_c_batch)
-
-        t_idx = torch.tensor([tup[0] for tup in lst_code_length_tuple], dtype=torch.long, device=device)
-        y_true = torch.tensor([tup[1] for tup in lst_code_length_tuple], dtype=dtype, device=device)
-
-        # t_prob_c_batch: (N_b, N_digits, N_ary); t_prob_c_batch[b,n,m] = p(c_n=m|x_b)
-        t_prob_c = torch.index_select(t_prob_c_batch, dim=0, index=t_idx)
-
-        # y_pred: (len(lst_code_length_tuple),)
-        # y_true: (len(lst_code_length_tuple),)
-        y_pred = self.calc_soft_code_length(t_prob_c=t_prob_c)
-
-        # scale ground-truth value and predicted value
-        if self._normalize_code_length:
-            # scale predicted value by the number of digits. then value range will be (-1, +1)
-            n_digits = t_prob_c_batch.shape[1]
-            y_pred /= n_digits
-            # scale ground-truth value by the user-specified value.
-            y_true *= self._normalize_coef_for_gt
-
-        loss = self._func_distance(y_pred, y_true)
-
-        return loss * self._scale
+    def forward(self, *args, **kwargs):
+        pass
 
 
-class HyponymyScoreLoss(CodeLengthPredictionLoss):
+class HyponymyScoreLoss(_SenseCodeBaseLoss):
 
-    def __init__(self, scale: float = 1.0, normalize_by_ground_truth_code_length: bool = False,
+    def __init__(self, normalize_by_ground_truth_code_length: bool = False,
                  log_scale: bool = False,
+                 weight_by_ground_truth_code_length: bool = False,
                  margin_on_code_length_penalty: float = 0.0,
                  distance_metric: str = "mse",
                  label_smoothing_factor: Optional[float] = None,
                  size_average=None, reduce=None, reduction='mean') -> None:
 
-        super(HyponymyScoreLoss, self).__init__(scale=scale,
+        super(HyponymyScoreLoss, self).__init__(
                     distance_metric=distance_metric,
                     size_average=size_average, reduce=reduce, reduction=reduction)
 
@@ -225,6 +148,7 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
             warnings.warn("we recommend you to set `normalize_by_ground_truth_code_length=True` for non-logarithmic scale.")
 
         self._normalize_by_ground_truth_code_length = normalize_by_ground_truth_code_length
+        self._weight_by_ground_truth_code_length = weight_by_ground_truth_code_length
         self._label_smoothing_factor = label_smoothing_factor
         self._log_scale = log_scale
         self._margin_on_code_length_penalty = margin_on_code_length_penalty
@@ -396,10 +320,11 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         :param input_code_probabilities: probability array. shape: (n_batch, n_digits, n_ary), t_prob_c_batch[b,n,m] = p(c_n=m|x_b)
         :param target_codes: list of (hypernym index, hyponym index, hyponymy score) tuples
         """
-        # x: hypernym, y: hyponym
 
-        dtype, device = self._dtype_and_device(input_code_probabilities)
+        # dtype, device = self._dtype_and_device(input_code_probabilities)
         n_digits, n_ary = input_code_probabilities.shape[1:]
+
+        # x: ground-truth, y: predicted probability
 
         # clamp values so that it won't produce nan value.
         t_prob_c_y = torch.clamp(input_code_probabilities, min=eps, max=(1.0 - eps))
@@ -412,7 +337,7 @@ class HyponymyScoreLoss(CodeLengthPredictionLoss):
         y_true = torch.zeros_like(y_pred)
         loss = self._func_distance(y_pred, y_true)
 
-        return loss * self._scale
+        return loss
 
 
 class EntailmentProbabilityLoss(HyponymyScoreLoss):
