@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
+import math
 
 from torch.optim import Adam
 
@@ -36,6 +37,9 @@ class AdamWithWarmup:
         return self.factor * \
             (self.model_size ** (-0.5) *
             min(step ** (-0.5), step * self.warmup ** (-1.5)))
+
+    def lr_max(self):
+        return self.factor / math.sqrt(self.warmup * self.model_size)
 
 
 def init_adam_with_warmup_optimizer(model, n_dim_hidden, factor:int = 2, warmup: int=4000, beta1=0.9, beta2=0.9995, eps=1e-9):
