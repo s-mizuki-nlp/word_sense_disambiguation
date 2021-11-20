@@ -38,6 +38,6 @@ class AdamWithWarmup:
             min(step ** (-0.5), step * self.warmup ** (-1.5)))
 
 
-def init_optimizer(model, n_dim_hidden, factor:int = 2, warmup: int=4000, beta1=0.9, beta2=0.9995, eps=1e-9):
+def init_adam_with_warmup_optimizer(model, n_dim_hidden, factor:int = 2, warmup: int=4000, beta1=0.9, beta2=0.9995, eps=1e-9):
     opt = Adam(model.parameters(), lr=0, betas=(beta1, beta2), eps=eps)
     return AdamWithWarmup(n_dim_hidden, factor, warmup, opt)
