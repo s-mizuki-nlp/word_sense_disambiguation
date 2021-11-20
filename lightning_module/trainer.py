@@ -81,8 +81,11 @@ class SenseCodeTrainer(LightningModule):
             eps = self._optimizer_params.get("eps", 1e-8)
             optimizer = Adam(self.parameters(), lr=0, betas=betas, eps=eps)
             opt = {
-                "scheduler":AdamWithWarmup(optimizer=optimizer, **self._optimizer_params),
-                "interval":"step"
+                "optimizer":optimizer,
+                "lr_scheduler":{
+                    "scheduler":AdamWithWarmup(optimizer=optimizer, **self._optimizer_params),
+                    "interval":"step"
+                }
             }
         else:
             _optimizer_class = getattr(optim, self._optimizer_class_name)
