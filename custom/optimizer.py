@@ -3,14 +3,14 @@
 import math
 
 from torch.optim import Adam
-
+# from torch.optim.lr_scheduler import _LRScheduler
 
 class AdamWithWarmup:
     """
     Optim wrapper that implements rate.
     ref: The Annotated Transformer. https://nlp.seas.harvard.edu/2018/04/03/attention.html#optimizer
     """
-    def __init__(self, model_size, factor, warmup, optimizer):
+    def __init__(self, model_size, factor, warmup, optimizer, **kwargs):
         self.optimizer = optimizer
         self._step = 0
         self.warmup = warmup

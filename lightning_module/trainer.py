@@ -22,7 +22,7 @@ from pytorch_lightning import LightningModule
 
 from model import HierarchicalCodeEncoder
 from model.loss_supervised import HyponymyScoreLoss, EntailmentProbabilityLoss, CrossEntropyLossWrapper
-from custom.optimizer import init_adam_with_warmup_optimizer
+from custom.optimizer import AdamWithWarmup
 
 class SenseCodeTrainer(LightningModule):
 
@@ -77,7 +77,13 @@ class SenseCodeTrainer(LightningModule):
         elif self._optimizer_class_name == "RAdam":
             opt = RAdam(self.parameters(), **self._optimizer_params)
         elif self._optimizer_class_name == "AdamWithWarmup":
-            opt = init_adam_with_warmup_optimizer(self._model, **self._optimizer_params)
+            betas = (self._optimizer_params.get("beta1", 0.9), self._optimizer_params.get("beta2", 0.999))
+            eps = self._optimizer_params.get("eps", 1e-8)
+            optimizer = Adam(self.parameters(), lr=0, betas=betas, eps=eps)
+            opt = {
+                "scheduler":AdamWithWarmup(optimizer=optimizer, **self._optimizer_params),
+                "interval":"step"
+            }
         else:
             _optimizer_class = getattr(optim, self._optimizer_class_name)
             opt = _optimizer_class(params=self.parameters(), **self._optimizer_params)
