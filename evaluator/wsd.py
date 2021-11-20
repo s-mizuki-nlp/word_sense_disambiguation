@@ -69,16 +69,12 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
 
         return t_log_prob_inclusion
 
-    def score_by_inference_metric(self, candidate_codes, predicted_code_prob: torch.Tensor) -> List[float]:
+    def score_by_inference_metric(self, candidate_codes, predicted_code_probs: torch.Tensor) -> List[float]:
         # candidate_codes: (n_candidates, n_digits)
-        # predicted_code_prob: (1, n_digits, n_ary)
+        # predicted_code_probs: (n_candidates, n_digits, n_ary)
 
         # reshaping
         t_candidate_codes = self._aux_hyponymy_score._one_hot_encoding(t_codes=candidate_codes, n_ary=self._model.n_ary, label_smoothing_factor=0.0)
-
-        n_candidates = t_candidate_codes.shape[0]
-        # predicted_code_probs: (n_candidates, n_digits, n_ary)
-        predicted_code_probs = torch.tile(predicted_code_prob, (n_candidates,1,1))
 
         # compute similarity score: bigger is better.
         if self._inference_metric == "common_prefix_length":
@@ -97,15 +93,15 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
         return tensor_to_numpy(t_scores).tolist()
 
     def predict(self, input: Dict[str, Any],
-                apply_greedy_decoding: bool = False,
+                use_generated_code_probability: bool = False,
                 apply_one_hot_encoding: bool = False,
                 mfs_reorder_by_lemma_counts: bool = False,
                 output_tie_lemma: bool = False) -> Iterable[str]:
         """
-        predict the most plausible sense using using
+        predict the most plausible sense based on conditional probability
 
         @param input:
-        @param apply_greedy_decoding:
+        @param use_generated_code_probability:
         @param apply_one_hot_encoding: convert from continuous relaxed repr. to one-hot repr.
         @return:
         """
@@ -120,20 +116,38 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
         if pos not in self._target_pos:
             return super().predict(input, reorder_by_lemma_counts=mfs_reorder_by_lemma_counts, output_tie_lemma=output_tie_lemma)
 
-        # if supported part-of-speech tag, then rank the candidates using predicted code probabilities.
-        # do inference
-        _, t_code_prob = self._model._predict(**input, apply_argmax_on_inference=apply_greedy_decoding)
-        if apply_one_hot_encoding:
-            t_code_prob = t_code_prob.argmax(dim=-1)
-            t_code_prob = self._aux_hyponymy_score._one_hot_encoding(t_codes=t_code_prob, n_ary=self._model.n_ary, label_smoothing_factor=0.0)
         # get candidates
         lst_candidate_lemmas = self.get_candidate_lemmas_from_wordnet(lemma, pos)
+        n_candidates = len(lst_candidate_lemmas)
         lst_synset_ids = [lemma.synset().name() for lemma in lst_candidate_lemmas]
         lst_synset_codes = [self._lexical_knowledge_synset.get_synset_code(synset_id) for synset_id in lst_synset_ids]
-        # t_candidate_codes: (n_candidates, n_digits, n_ary)
-        t_candidate_codes = torch.LongTensor(lst_synset_codes, device="cpu").to(t_code_prob.device)
+        # t_candidate_codes: (n_candidates, n_digits)
+        device = input["entity_embeddings"].device
+        t_candidate_codes = torch.LongTensor(lst_synset_codes, device="cpu").to(device)
+
+        # if supported part-of-speech tag, then rank the candidates using predicted code probabilities.
+        # do inference
+        # t_code_probs: (n_candidates, n_digits, n_ary)
+        if use_generated_code_probability:
+            # autoregressive generation from scratch
+            _, t_code_prob = self._model._encode(**input)
+            t_code_probs = torch.tile(t_code_prob, (n_candidates, 1, 1))
+        else:
+            # compute conditional probability Pr{Y_d|y_{<d}} for each candidates
+            lst_code_probs = []
+            for t_candidate_code in torch.split(t_candidate_codes, 1, dim=0):
+                input["ground_truth_synset_codes"] = t_candidate_code
+                _, t_code_prob = self._model._predict(**input, apply_argmax_on_inference=True)
+                del input["ground_truth_synset_codes"]
+                lst_code_probs.append(t_code_prob.squeeze(dim=0))
+            t_code_probs = torch.stack(lst_code_probs, dim=0)
+
+        if apply_one_hot_encoding:
+            t_code_probs = t_code_probs.argmax(dim=-1)
+            t_code_probs = self._aux_hyponymy_score._one_hot_encoding(t_codes=t_code_probs, n_ary=self._model.n_ary, label_smoothing_factor=0.0)
+
         # calc score for each candidate using specified inference metric.
-        lst_metric_scores = self.score_by_inference_metric(candidate_codes=t_candidate_codes, predicted_code_prob=t_code_prob)
+        lst_metric_scores = self.score_by_inference_metric(candidate_codes=t_candidate_codes, predicted_code_probs=t_code_probs)
 
         # return top-k lemma keys
         if ties_fallback_to_mfs:
