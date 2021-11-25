@@ -13,6 +13,7 @@ from collections import defaultdict
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
+from nltk.corpus import wordnet as wn
 
 from model.loss_supervised import HyponymyScoreLoss
 
@@ -125,11 +126,17 @@ class WSDTaskEvaluatorBase(BaseEvaluatorByRaganato, metaclass=ABCMeta):
     def __init__(self,
                  evaluation_dataset: Union[EntityLevelWSDEvaluationDataset, WSDTaskDataset],
                  ground_truth_lemma_keys_field_name: str = "ground_truth_lemma_keys",
+                 evaluation_category: str = "lemma",
                  breakdown_attributes: Optional[Iterable[Set[str]]] = None,
                  verbose: bool = False,
                  **kwargs_dataloader):
 
         self._ground_truth_lemma_keys_field_name = ground_truth_lemma_keys_field_name
+        self._evaluation_category = evaluation_category
+
+        available_category = {"lemma", "lexname"}
+        assert evaluation_category in available_category, \
+            ValueError(f"`evaluation_category` must be: {available_category}")
 
         # create evalset dataloader
         self._evaluation_dataset = evaluation_dataset
@@ -166,6 +173,22 @@ class WSDTaskEvaluatorBase(BaseEvaluatorByRaganato, metaclass=ABCMeta):
     @abstractmethod
     def predict(self, input: Dict[str, Any], **kwargs) -> Iterable[str]:
         pass
+
+    def _lemma_to_lexname(self, lemma_or_lemma_key: Union[str, wn.lemma]):
+        if isinstance(lemma_or_lemma_key, str):
+            lemma = wn.lemma_from_key(lemma_or_lemma_key)
+        return lemma.synset().lexname()
+
+    def _lemma_to_synset_id(self, lemma_or_lemma_key: Union[str, wn.lemma]):
+        if isinstance(lemma_or_lemma_key, str):
+            lemma = wn.lemma_from_key(lemma_or_lemma_key)
+        return lemma.synset().name()
+
+    def compute_metrics(self, ground_truthes: Iterable[str], predictions: Iterable[str]):
+        if self._evaluation_category == "lexname":
+            ground_truthes = list(map(self._lemma_to_lexname, ground_truthes))
+            predictions = list(map(self._lemma_to_lexname, predictions))
+        return super().compute_metrics(ground_truthes=ground_truthes, predictions=predictions)
 
     def assertion(self):
         return True
