@@ -268,4 +268,8 @@ class SynsetDataset(NDJSONDataset, Dataset):
                 synset_id = parent_synset["id"]
 
     def get_synset_code(self, synset_id: str):
-        return self[synset_id]["code"]
+        if synset_id in self:
+            return self[synset_id]["code"]
+        else:
+            return None
+
