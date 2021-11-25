@@ -46,13 +46,13 @@ cfg_lemma_datasets = {
         "lemma_lowercase": True,
         "description": "WordNet(N+V), includes instance-of, N_ary = unlimited. value assignment rule: random",
     },
-    "WordNet-noun-verb-incl-instance-without-top-digit": {
-        "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "lemma_dictionary_pos-n+v_ary-64_incl-instance-of.jsonl"),
-        "transform_functions": {"synset_codes": top_digits_remover},
-        "binary": False,
-        "lemma_lowercase": True,
-        "description": "WordNet(N+V), includes instance-of, N_ary = 64, Trim most significant (=top) digit.",
-    },
+    # "WordNet-noun-verb-incl-instance-without-top-digit": {
+    #     "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "lemma_dictionary_pos-n+v_ary-64_incl-instance-of.jsonl"),
+    #     "transform_functions": {"synset_codes": top_digits_remover},
+    #     "binary": False,
+    #     "lemma_lowercase": True,
+    #     "description": "WordNet(N+V), includes instance-of, N_ary = 64, Trim most significant (=top) digit.",
+    # },
     "WordNet-noun-verb-incl-instance-monosemous": {
         "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "lemma_dictionary_pos-n+v_ary-64_incl-instance-of.jsonl"),
         "binary": False,
@@ -110,14 +110,14 @@ cfg_synset_datasets = {
         "lemma_lowercase": True,
         "description": "WordNet(N+V), includes instance-of, N_ary = unlimited. value assignment rule: random",
     },
-    "WordNet-noun-verb-incl-instance-without-top-digit": {
-        "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "synset_taxonomy_pos-n+v_ary-64_incl-instance-of.jsonl"),
-        "transform_functions": {"code": top_digit_remover},
-        "filter_function": _root_synset_filter,
-        "binary": False,
-        "lemma_lowercase": True,
-        "description": "WordNet(N+V), includes instance-of, N_ary = 64, Trim most significant (=top) digit and removed root entity (i.e. entity.n.01)",
-    },
+    # "WordNet-noun-verb-incl-instance-without-top-digit": {
+    #     "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "synset_taxonomy_pos-n+v_ary-64_incl-instance-of.jsonl"),
+    #     "transform_functions": {"code": top_digit_remover},
+    #     "filter_function": _root_synset_filter,
+    #     "binary": False,
+    #     "lemma_lowercase": True,
+    #     "description": "WordNet(N+V), includes instance-of, N_ary = 64, Trim most significant (=top) digit and removed root entity (i.e. entity.n.01)",
+    # },
     "WordNet-noun-verb": {
         "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "synset_taxonomy_pos-n+v_ary-64.jsonl"),
         "binary": False,
