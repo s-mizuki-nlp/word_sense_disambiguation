@@ -9,6 +9,7 @@ import os
 from dataset.transform import top_digit_remover, top_digits_remover
 from dataset.filter import DictionaryFilter
 _root_synset_filter = DictionaryFilter(excludes={"id":{"entity.n.01", "verb_dummy_root.v.01"}})
+_noun_selector = DictionaryFilter(includes={"pos":{"n",}})
 
 DIR_LEXICAL_KNOWLEDGE = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_taxonomy/"
 
@@ -25,6 +26,14 @@ cfg_lemma_datasets = {
     },
     "WordNet-noun-verb-incl-instance-random-assignment": {
         "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "lemma_dictionary_pos-n+v_ary-64_assign-random_incl-instance-of.jsonl"),
+        "binary": False,
+        "monosemous_entity_only": False,
+        "lemma_lowercase": True,
+        "description": "WordNet(N+V), includes instance-of, N_ary = 64. value assignment rule: random",
+    },
+    "WordNet-noun-incl-instance-random-assignment": {
+        "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "lemma_dictionary_pos-n+v_ary-64_assign-random_incl-instance-of.jsonl"),
+        "filter_function": _noun_selector,
         "binary": False,
         "monosemous_entity_only": False,
         "lemma_lowercase": True,
@@ -84,6 +93,13 @@ cfg_synset_datasets = {
     },
     "WordNet-noun-verb-incl-instance-random-assignment": {
         "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "synset_taxonomy_pos-n+v_ary-64_assign-random_incl-instance-of.jsonl"),
+        "binary": False,
+        "lemma_lowercase": True,
+        "description": "WordNet(N+V), includes instance-of, N_ary = 64. value assignment rule: random",
+    },
+    "WordNet-noun-incl-instance-random-assignment": {
+        "path": os.path.join(DIR_LEXICAL_KNOWLEDGE, "synset_taxonomy_pos-n+v_ary-64_assign-random_incl-instance-of.jsonl"),
+        "filter_function":_noun_selector,
         "binary": False,
         "lemma_lowercase": True,
         "description": "WordNet(N+V), includes instance-of, N_ary = 64. value assignment rule: random",

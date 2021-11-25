@@ -11,6 +11,7 @@ class AdamWithWarmup(_LRScheduler):
     ref: The Annotated Transformer. https://nlp.seas.harvard.edu/2018/04/03/attention.html#optimizer
     """
     def __init__(self, model_size, factor, warmup, optimizer, **kwargs):
+        super().__init__(optimizer=optimizer)
         self.optimizer = optimizer
         self._step = 0
         self.warmup = warmup
