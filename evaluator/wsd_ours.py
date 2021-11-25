@@ -22,13 +22,20 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
                  model: HierarchicalCodeEncoder,
                  evaluation_dataset: WSDTaskDataset,
                  inference_metric: str,
+                 target_pos: Tuple[str],
+                 evaluation_category: str = "lemma",
                  lexical_knowledge_synset_dataset: Optional[SynsetDataset] = None,
-                 target_pos: Tuple[str] = ("n","v"),
                  ground_truth_lemma_keys_field_name: str = "ground_truth_lemma_keys",
                  breakdown_attributes: Optional[Iterable[Set[str]]] = None,
                  verbose: bool = False,
                  **kwargs_dataloader):
-        super().__init__(evaluation_dataset, ground_truth_lemma_keys_field_name, breakdown_attributes, verbose, **kwargs_dataloader)
+        super().__init__(
+            evaluation_dataset=evaluation_dataset,
+            evaluation_category=evaluation_category,
+            ground_truth_lemma_keys_field_name=ground_truth_lemma_keys_field_name,
+            breakdown_attributes=breakdown_attributes,
+            verbose=verbose,
+            **kwargs_dataloader)
 
         self._aux_hyponymy_score = HyponymyScoreLoss(log_scale=False)
         self._model = model
@@ -157,6 +164,16 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
         else:
             lst_scores = lst_metric_scores
         return self.return_top_k_lemma_keys(lst_candidate_lemmas, lst_scores, multiple_output=output_tie_lemma)
+
+    def compute_metrics(self, ground_truthes: Iterable[str], predictions: Iterable[str]):
+        if self.verbose:
+            ground_truth_synset_ids = list(map(self._lemma_to_synset_id, ground_truthes))
+            sense_codes = list(map(self._lexical_knowledge_synset.get_synset_code, ground_truth_synset_ids))
+            print(f"ground truth senses:")
+            for synset_id, ground_truth, sense_code in zip(ground_truth_synset_ids, ground_truthes, sense_codes):
+                print(f"{synset_id}-{ground_truth}: {sense_code}")
+
+        super().compute_metrics(ground_truthes=ground_truthes, predictions=predictions)
 
     def _print_verbose(self, lst_tup_lemma_and_scores: List[Tuple[wn.lemma, Union[numeric, Tuple[numeric]]]]):
         print(f"metric: {self._inference_metric}")
