@@ -165,23 +165,28 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
             lst_scores = lst_metric_scores
         return self.return_top_k_lemma_keys(lst_candidate_lemmas, lst_scores, multiple_output=output_tie_lemma)
 
-    def compute_metrics(self, ground_truthes: Iterable[str], predictions: Iterable[str]):
-        if self.verbose:
-            ground_truth_synset_ids = list(map(self._lemma_to_synset_id, ground_truthes))
-            sense_codes = list(map(self._lexical_knowledge_synset.get_synset_code, ground_truth_synset_ids))
-            print(f"ground truth senses:")
-            for synset_id, ground_truth, sense_code in zip(ground_truth_synset_ids, ground_truthes, sense_codes):
-                print(f"{synset_id}-{ground_truth}: {sense_code}")
-
-        super().compute_metrics(ground_truthes=ground_truthes, predictions=predictions)
+    def __iter__(self):
+        it = super().__iter__()
+        for inputs_for_predictor, inputs_for_evaluator, ground_truthes, predictions, dict_metrics in it:
+            if self.verbose:
+                print(f"ground truth: {inputs_for_evaluator['lemma']}|{inputs_for_predictor['pos']}")
+                lexnames = list(map(self._lemma_to_lexname, ground_truthes))
+                ground_truth_synset_ids = list(map(self._lemma_to_synset_id, ground_truthes))
+                sense_codes = list(map(self._lexical_knowledge_synset.get_synset_code, ground_truth_synset_ids))
+                for lexname, synset_id, ground_truth, sense_code in zip(lexnames, ground_truth_synset_ids, ground_truthes, sense_codes):
+                    print(f"\t{lexname}-{synset_id}-{ground_truth}: {sense_code}")
+                print("-------------")
+            yield inputs_for_predictor, inputs_for_evaluator, ground_truthes, predictions, dict_metrics
 
     def _print_verbose(self, lst_tup_lemma_and_scores: List[Tuple[wn.lemma, Union[numeric, Tuple[numeric]]]]):
         print(f"metric: {self._inference_metric}")
+        print(f"candidates:")
         for lemma, scores in lst_tup_lemma_and_scores:
+            lexname = lemma.synset().lexname()
             synset_id = lemma.synset().name()
             sense_code = self._lexical_knowledge_synset.get_synset_code(synset_id)
-            str_sense_code = "-".join(map(str, sense_code))
+            str_sense_code = str(sense_code) if sense_code is None else "-".join(map(str, sense_code))
             if isinstance(scores, float):
-                print(f"{synset_id}-{lemma.key()}: {scores:1.6f}, {str_sense_code}")
+                print(f"\t{lexname}-{synset_id}-{lemma.key()}: {scores:1.6f}, {str_sense_code}")
             else:
-                print(f"{synset_id}-{lemma.key()}: {scores}, {str_sense_code}")
+                print(f"\t{lexname}-{synset_id}-{lemma.key()}: {scores}, {str_sense_code}")
