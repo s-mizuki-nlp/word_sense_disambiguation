@@ -16,7 +16,9 @@ from dataset.utils import tensor_to_numpy
 
 class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
 
-    __AVAILABLE_METRICS = ("common_prefix_length","common_prefix_length_ratio", "inclusion_probability", "synonym_probability")
+    __AVAILABLE_METRICS = ("common_prefix_length","common_prefix_length_ratio",
+                           "inclusion_probability", "synonym_probability",
+                           "perplexity")
 
     def __init__(self,
                  model: HierarchicalCodeEncoder,
@@ -76,6 +78,19 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
 
         return t_log_prob_inclusion
 
+    def calc_perplexity(self, predicted_code_probs: torch.Tensor, candidate_codes: torch.Tensor) -> torch.Tensor:
+        """
+        perplexity = average conditional log probability: \frac{1}{|y|}\sum_{lnp(y_d|y_{<d}}
+
+        @param predicted_code_probs:
+        @param candidate_codes:
+        """
+        t_code_length_candidates = (candidate_codes.argmax(dim=-1) != 0).sum(axis=-1).type(torch.float)
+        t_log_prob_synonym = self._aux_hyponymy_score.calc_log_synonym_probability(t_prob_c_x=candidate_codes, t_prob_c_y=predicted_code_probs)
+        t_perplexity = t_log_prob_synonym / t_code_length_candidates
+
+        return t_perplexity
+
     def score_by_inference_metric(self, candidate_codes, predicted_code_probs: torch.Tensor) -> List[float]:
         # candidate_codes: (n_candidates, n_digits)
         # predicted_code_probs: (n_candidates, n_digits, n_ary)
@@ -96,6 +111,9 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
         elif self._inference_metric == "synonym_probability":
             t_scores = self.calc_inclusion_probability(predicted_code_probs=predicted_code_probs,
                                                          candidate_codes=t_candidate_codes, add_entailment_probs=False)
+        elif self._inference_metric == "perplexity":
+            t_scores = self.calc_perplexity(predicted_code_probs=predicted_code_probs,
+                                            candidate_codes=t_candidate_codes)
 
         return tensor_to_numpy(t_scores).tolist()
 
