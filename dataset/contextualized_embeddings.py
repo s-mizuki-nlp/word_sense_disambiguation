@@ -17,6 +17,7 @@ class BERTEmbeddingsBatchDataset(AbstractFormatDataset, IterableDataset):
                  transform_functions=None,
                  filter_function: Optional[Union[Callable, List[Callable]]] = None,
                  n_rows: Optional[int] = None,
+                 return_record_only: bool = False,
                  description: str = ""):
 
         super().__init__(path, transform_functions, filter_function, n_rows, description)
@@ -33,6 +34,7 @@ class BERTEmbeddingsBatchDataset(AbstractFormatDataset, IterableDataset):
         self._num_groups = len(group_names)
         self._num_sentences = num_sentences
         self._n_dim = group["embeddings"].shape[-1]
+        self._return_record_only = return_record_only
 
         ifs.close()
 
@@ -44,11 +46,14 @@ class BERTEmbeddingsBatchDataset(AbstractFormatDataset, IterableDataset):
         ifs = h5py.File(self._path, mode="r")
         for group_name in lst_group_names:
             group = ifs.get(group_name)
+
             record = {
-                "embeddings": group["embeddings"][()],
-                "sequence_lengths": group["sequence_lengths"][()],
                 "records": json.loads(group["records"][()])
             }
+            if not self._return_record_only:
+                record["embeddings"] = group["embeddings"][()]
+                record["sequence_lengths"] = group["sequence_lengths"][()]
+
             yield record
 
         ifs.close()
@@ -75,9 +80,10 @@ class BERTEmbeddingsDataset(BERTEmbeddingsBatchDataset):
                  transform_functions=None,
                  filter_function: Optional[Union[Callable, List[Callable]]] = None,
                  n_rows: Optional[int] = None,
+                 return_record_only: bool = False,
                  description: str = ""):
 
-        super().__init__(path, transform_functions, filter_function, n_rows, description)
+        super().__init__(path, transform_functions, filter_function, n_rows, return_record_only, description)
         self._padding = padding
         self._max_sequence_length = max_sequence_length
 
@@ -94,17 +100,33 @@ class BERTEmbeddingsDataset(BERTEmbeddingsBatchDataset):
 
         iter_batch = super()._record_loader(start=start, end=end)
         for batch in iter_batch:
-            lst_embeddings = convert_compressed_format_to_list_of_tensors(embeddings=batch["embeddings"],
-                                                                 lst_sequence_lengths=batch["sequence_lengths"],
-                                                                 padding=self._padding,
-                                                                 max_sequence_length=self._max_sequence_length)
             lst_records = batch["records"]
 
-            iter_records = zip(lst_embeddings, batch["sequence_lengths"], lst_records)
-            for embedding, seq_len, record in iter_records:
-                dict_record = {
-                    "embedding": embedding,
-                    "sequence_length": seq_len,
-                    "record": record
-                }
-                yield dict_record
+            if self._return_record_only:
+                for record in lst_records:
+                    dict_record = {
+                        "record": record
+                    }
+                    yield dict_record
+            else:
+                lst_sequence_lengths = batch["sequence_lengths"]
+                lst_embeddings = convert_compressed_format_to_list_of_tensors(embeddings=batch["embeddings"],
+                                                                 lst_sequence_lengths=lst_sequence_lengths,
+                                                                 padding=self._padding,
+                                                                 max_sequence_length=self._max_sequence_length)
+                iter_records = zip(lst_embeddings, lst_sequence_lengths, lst_records)
+                for embedding, seq_len, record in iter_records:
+                    dict_record = {
+                        "embedding": embedding,
+                        "sequence_length": seq_len,
+                        "record": record
+                    }
+                    yield dict_record
+
+    @property
+    def return_record_only(self):
+        return self._return_record_only
+
+    @return_record_only.setter
+    def return_record_only(self, flag: bool):
+        self._return_record_only = flag
