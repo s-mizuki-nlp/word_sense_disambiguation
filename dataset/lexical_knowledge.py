@@ -122,24 +122,6 @@ class LemmaDataset(NDJSONDataset, Dataset):
         return record["is_monosemous"]
 
     @property
-    def synset_code_n_digits(self):
-        if not hasattr(self, "_synset_code_n_digits"):
-            def _apply_function(it_lst_codes):
-                return max([max(map(len, lst_codes)) for lst_codes in it_lst_codes])
-            self._synset_code_n_digits = self._apply(apply_field_name="synset_codes", disable_transform_functions=False,
-                           apply_function=_apply_function)
-        return self._synset_code_n_digits
-
-    @property
-    def synset_code_n_ary(self):
-        if not hasattr(self, "_synset_code_n_ary"):
-            def _apply_function(it_lst_codes):
-                return max([max(map(max, lst_codes)) for lst_codes in it_lst_codes]) + 1
-            self._synset_code_n_ary = self._apply(apply_field_name="synset_codes", disable_transform_functions=False,
-                           apply_function=_apply_function)
-        return self._synset_code_n_ary
-
-    @property
     def n_entity(self):
         return len(self._lexical_knowledge)
 
@@ -230,7 +212,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
         return sense_code[:n_length]
 
     def _pad_trailing_zeroes(self, sense_code_prefix: List[int]) -> List[int]:
-        n_pad = self.synset_code_n_digits - len(sense_code_prefix)
+        n_pad = self.n_digits - len(sense_code_prefix)
         padded = sense_code_prefix + [0]*n_pad
         return padded
 
@@ -262,7 +244,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
             num_descendents[key] = value - 1
 
         # 2. record sense code prefix info
-        n_digits = self.synset_code_n_digits
+        n_digits = self.n_digits
         index = 0
         for record in self:
             sense_code = record["code"]
@@ -345,19 +327,19 @@ class SynsetDataset(NDJSONDataset, Dataset):
         return self._sense_code_taxonomy[key]
 
     @property
-    def synset_code_n_digits(self):
-        if not hasattr(self, "_synset_code_n_digits"):
+    def n_digits(self):
+        if not hasattr(self, "_n_digits"):
             def _apply_function(it_codes):
                 return max([len(code) for code in it_codes])
-            self._synset_code_n_digits = self._apply(apply_field_name="code", disable_transform_functions=False,
-                           apply_function=_apply_function)
-        return self._synset_code_n_digits
+            self._n_digits = self._apply(apply_field_name="code", disable_transform_functions=False,
+                                         apply_function=_apply_function)
+        return self._n_digits
 
     @property
-    def synset_code_n_ary(self):
-        if not hasattr(self, "_synset_code_n_ary"):
+    def n_ary(self):
+        if not hasattr(self, "_n_ary"):
             def _apply_function(it_codes):
                 return max([max(code) for code in it_codes]) + 1
-            self._synset_code_n_ary = self._apply(apply_field_name="synset_codes", disable_transform_functions=False,
-                           apply_function=_apply_function)
-        return self._synset_code_n_ary
+            self._n_ary = self._apply(apply_field_name="synset_codes", disable_transform_functions=False,
+                                      apply_function=_apply_function)
+        return self._n_ary
