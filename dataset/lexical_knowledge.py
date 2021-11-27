@@ -2,7 +2,7 @@
 # -*- coding:utf-8 -*-
 import warnings
 from typing import Optional, Iterable, Tuple, Set, Type, List, Dict, Callable, Union, Any
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 from torch.utils.data import Dataset
 import nltk
@@ -206,7 +206,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
         self._lemma_lowercase = lemma_lowercase
 
         self._synsets = self._setup_lexical_knowledge()
-
+        self._sense_code_taxonomy = self._setup_sense_code_taxonomy()
 
     def _setup_wordnet(self):
         try:
@@ -220,6 +220,20 @@ class SynsetDataset(NDJSONDataset, Dataset):
     def _synset_code_to_lookup_key(self, synset_code: List[int]):
         return "-".join(map(str, synset_code))
 
+    def synset_code_to_prefixes(self, sense_code: List[int]) -> List[List[int]]:
+        n_length = len(sense_code) - sense_code.count(0)
+        lst_prefixes = [sense_code[:d] for d in range(n_length+1)]
+        return lst_prefixes
+
+    def _trim_trailing_zeroes(self, sense_code: List[int]) -> List[int]:
+        n_length = len(sense_code) - sense_code.count(0)
+        return sense_code[:n_length]
+
+    def _pad_trailing_zeroes(self, sense_code_prefix: List[int]) -> List[int]:
+        n_pad = self.synset_code_n_digits - len(sense_code_prefix)
+        padded = sense_code_prefix + [0]*n_pad
+        return padded
+
     def _setup_lexical_knowledge(self) -> Dict[str, Any]:
         result = {}
         for record in self:
@@ -229,6 +243,59 @@ class SynsetDataset(NDJSONDataset, Dataset):
             result[key_id] = record
             result[key_code] = record
 
+        return result
+
+    def _setup_sense_code_taxonomy(self) -> Dict[str, Any]:
+        result = {}
+
+        # 1. count ancestors
+        num_descendents = Counter()
+        for record in self:
+            sense_code = record["code"]
+            prefixes = self.synset_code_to_prefixes(sense_code)
+            str_prefixes = list(map(self._synset_code_to_lookup_key, prefixes))
+            num_descendents.update(str_prefixes)
+        # decrement oneself except of virtual root (lookup_key="")
+        for key, value in num_descendents.items():
+            if key == "":
+                continue
+            num_descendents[key] = value - 1
+
+        # 2. record sense code prefix info
+        n_digits = self.synset_code_n_digits
+        index = 0
+        for record in self:
+            sense_code = record["code"]
+            # [1,2,0,0] -> [[], [1,], [1,2]]
+            prefixes = self.synset_code_to_prefixes(sense_code)
+            # [1,2,0,0] -> [1,2,0]
+            next_values = sense_code[:len(prefixes)]
+            # append zero for no trailing zeroes
+            if len(prefixes) > n_digits:
+                assert len(prefixes) == n_digits+1, f"unexpected sense code: {sense_code}"
+                next_values += [0]
+            for prefix, next_value in zip(prefixes, next_values):
+                # [1,2] -> "1-2"
+                lookup_key = self._synset_code_to_lookup_key(prefix)
+                if lookup_key not in result:
+                    result_k = {
+                        "idx": index,
+                        "synset_id": None,
+                        "code": None,
+                        "next_values": set(),
+                        "num_descendents": num_descendents[lookup_key],
+                        "is_terminal": True if num_descendents[lookup_key] == 0 else False
+                    }
+                    _padded_code = self._pad_trailing_zeroes(prefix)
+                    if _padded_code in self:
+                        result_k["synset_id"] = self.__getitem__(_padded_code)["id"]
+                        result_k["code"] = _padded_code
+                    index += 1
+                    result[lookup_key] = result_k
+
+                result[lookup_key]["next_values"].add(next_value)
+
+        # result["1-2"] = {"idx":138, "next_values": {4,1,135,...,}, "num_descendents": 16788}
         return result
 
     def __getitem__(self, synset_id_or_synset_code: Union[str, List[int]]):
@@ -273,3 +340,24 @@ class SynsetDataset(NDJSONDataset, Dataset):
         else:
             return None
 
+    def get_synset_code_prefix(self, prefix: List[int]):
+        key = self._synset_code_to_lookup_key(prefix)
+        return self._sense_code_taxonomy[key]
+
+    @property
+    def synset_code_n_digits(self):
+        if not hasattr(self, "_synset_code_n_digits"):
+            def _apply_function(it_codes):
+                return max([len(code) for code in it_codes])
+            self._synset_code_n_digits = self._apply(apply_field_name="code", disable_transform_functions=False,
+                           apply_function=_apply_function)
+        return self._synset_code_n_digits
+
+    @property
+    def synset_code_n_ary(self):
+        if not hasattr(self, "_synset_code_n_ary"):
+            def _apply_function(it_codes):
+                return max([max(code) for code in it_codes]) + 1
+            self._synset_code_n_ary = self._apply(apply_field_name="synset_codes", disable_transform_functions=False,
+                           apply_function=_apply_function)
+        return self._synset_code_n_ary
