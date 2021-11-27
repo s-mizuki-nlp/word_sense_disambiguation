@@ -156,8 +156,6 @@ class LemmaDataset(NDJSONDataset, Dataset):
     @property
     def verbose(self):
         v = super().verbose
-        v["synset_code_n_digits"] = self.synset_code_n_digits
-        v["synset_code_n_ary"] = self.synset_code_n_ary
         v["n_lemma_and_pos"] = self.n_lemma_and_pos
         v["n_lemma"] = self.n_lemma
         v["pos_tagset"] = self.pos_tagset
@@ -343,3 +341,15 @@ class SynsetDataset(NDJSONDataset, Dataset):
             self._n_ary = self._apply(apply_field_name="synset_codes", disable_transform_functions=False,
                                       apply_function=_apply_function)
         return self._n_ary
+
+    @property
+    def n_synset(self):
+        return len(self._synsets) // 2
+
+    @property
+    def verbose(self):
+        v = super().verbose
+        v["n_digits"] = self.n_digits
+        v["n_ary"] = self.n_ary
+        v["n_synset"] = self.n_synset
+        return v
