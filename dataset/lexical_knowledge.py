@@ -338,7 +338,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
         if not hasattr(self, "_n_ary"):
             def _apply_function(it_codes):
                 return max([max(code) for code in it_codes]) + 1
-            self._n_ary = self._apply(apply_field_name="synset_codes", disable_transform_functions=False,
+            self._n_ary = self._apply(apply_field_name="code", disable_transform_functions=False,
                                       apply_function=_apply_function)
         return self._n_ary
 
