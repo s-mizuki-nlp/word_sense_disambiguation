@@ -347,9 +347,14 @@ class SynsetDataset(NDJSONDataset, Dataset):
         return len(self._synsets) // 2
 
     @property
+    def n_synset_code_prefix(self):
+        return len(self._sense_code_taxonomy)
+
+    @property
     def verbose(self):
         v = super().verbose
         v["n_digits"] = self.n_digits
         v["n_ary"] = self.n_ary
         v["n_synset"] = self.n_synset
+        v["n_synset_code_prefix"] = self.n_synset_code_prefix
         return v
