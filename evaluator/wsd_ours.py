@@ -101,7 +101,7 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
             losses = F.cross_entropy(input=logits, target=targets, reduction="none")
             t_code_length_candidates = targets.shape[-1]
 
-        t_log_probability = losses.sum(dim=-1) / t_code_length_candidates
+        t_log_probability = - losses.sum(dim=-1) / t_code_length_candidates
 
         return t_log_probability
 
