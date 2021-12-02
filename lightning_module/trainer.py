@@ -271,7 +271,7 @@ class SenseCodeTrainer(LightningModule):
             t_gen_cpl_batch = self._aux_hyponymy_score.calc_hard_common_ancestor_length(t_code_gt=target_codes, t_code_pred=t_code_pred)
             t_gen_cpl = torch.mean(t_gen_cpl_batch)
         else:
-            t_gen_cpl = None
+            t_gen_cpl = 0.0
 
         # entailment probability
         t_prob_entail = self._aux_hyponymy_score.calc_ancestor_probability(t_prob_c_x=t_code_probs_gt, t_prob_c_y=conditional_code_probs)
