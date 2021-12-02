@@ -49,6 +49,10 @@ class HierarchicalCodeEncoder(nn.Module):
         return self._encoder.n_digits
 
     @property
+    def n_n_code_prefix(self):
+        return self._encoder.n_synset_code_prefix
+
+    @property
     def n_dim_hidden(self):
         return self._encoder.n_dim_hidden
 
@@ -73,13 +77,8 @@ class HierarchicalCodeEncoder(nn.Module):
         return self._encoder.has_discretizer
 
     @property
-    def temperature(self):
-        return getattr(self._encoder.discretizer, "temperature", None)
-
-    @temperature.setter
-    def temperature(self, value):
-        if self.temperature is not None:
-            setattr(self._encoder.discretizer, "temperature", value)
+    def input_sense_code_prefix(self):
+        return self._encoder.input_sense_code_prefix
 
     def summary(self, include_submodules: bool = False, flatten: bool = False):
         ret = {
@@ -158,6 +157,7 @@ class HierarchicalCodeEncoder(nn.Module):
 
     def forward_by_tf_encoder(self, pos: Optional[List[str]] = None,
                               ground_truth_synset_codes: Optional[torch.Tensor] = None,
+                              ground_truth_synset_code_prefixes: Optional[torch.Tensor] = None,
                               entity_embeddings: Optional[torch.Tensor] = None,
                               entity_sequence_mask: Optional[torch.BoolTensor] = None,
                               context_embeddings: Optional[torch.Tensor] = None,
@@ -169,6 +169,7 @@ class HierarchicalCodeEncoder(nn.Module):
                                                            entity_embeddings=entity_embeddings,
                                                            entity_sequence_mask=entity_sequence_mask,
                                                            ground_truth_synset_codes=ground_truth_synset_codes,
+                                                           ground_truth_synset_code_prefixes=ground_truth_synset_code_prefixes,
                                                            context_embeddings=context_embeddings,
                                                            context_sequence_mask=context_sequence_mask,
                                                            subword_spans=subword_spans,
@@ -180,6 +181,7 @@ class HierarchicalCodeEncoder(nn.Module):
     def forward(self, pos: Optional[List[str]] = None,
                 entity_span_avg_vectors: Optional[torch.Tensor] = None,
                 ground_truth_synset_codes: Optional[torch.Tensor] = None,
+                ground_truth_synset_code_prefixes: Optional[torch.Tensor] = None,
                 entity_embeddings: Optional[torch.Tensor] = None,
                 entity_sequence_mask: Optional[torch.BoolTensor] = None,
                 context_embeddings: Optional[torch.Tensor] = None,
@@ -223,6 +225,7 @@ class HierarchicalCodeEncoder(nn.Module):
                                                                         context_embeddings=context_embeddings,
                                                                         context_sequence_mask=context_sequence_mask,
                                                                         ground_truth_synset_codes=ground_truth_synset_codes,
+                                                                        ground_truth_synset_code_prefixes=ground_truth_synset_code_prefixes,
                                                                         subword_spans=subword_spans,
                                                                         on_inference=on_inference,
                                                                         **kwargs)
@@ -246,6 +249,8 @@ class HierarchicalCodeEncoder(nn.Module):
         """
         assert kwargs.get("ground_truth_synset_codes",None) is not None, \
             f"`ground_truth_synset_codes` is missing."
+        assert kwargs.get("ground_truth_synset_code_prefixes",None) is not None, \
+            f"`ground_truth_synset_code_prefixes` is missing."
         t_code, t_code_prob = self.forward(**kwargs, requires_grad=False, on_inference=True)
         if t_code.ndim == 3:
             t_code = t_code.argmax(dim=-1)
@@ -271,6 +276,7 @@ class HierarchicalCodeEncoder(nn.Module):
         @return:
         """
         kwargs["ground_truth_synset_codes"] = None
+        kwargs["ground_truth_synset_code_prefixes"] = None
         t_code, t_code_prob = self.forward(**kwargs, requires_grad=False, on_inference=True, apply_argmax_on_inference=True)
         if t_code.ndim == 3:
             t_code = t_code.argmax(dim=-1)

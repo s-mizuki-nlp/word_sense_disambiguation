@@ -173,7 +173,7 @@ class HashEmbedding(nn.Module):
     """
 
     def __init__(self, num_embeddings, embedding_dim, num_buckets=None, num_hashes=2, train_sharedEmbed=True,
-                 train_weight=True, append_weight=True, aggregation_mode='sum', mask_zero=False, seed=None, oldAlgorithm=False):
+                 train_weight=True, append_weight=True, aggregation_mode='sum', padding_idx=None, seed=None, oldAlgorithm=False):
         super(HashEmbedding, self).__init__()
 
         self.num_embeddings = num_embeddings
@@ -184,7 +184,7 @@ class HashEmbedding(nn.Module):
         self.train_sharedEmbed = train_sharedEmbed
         self.train_weight = train_weight
         self.append_weight = append_weight
-        self.padding_idx = 0 if mask_zero else None
+        self.padding_idx = padding_idx
         self.seed = seed
         # THERE IS NO ADVANTAGE OF SETTING THE FOLLOWING TO TRUE, I JUST HAVE TO COMPARE WITH THE ALGORITHM IN THE PAPER
         self.oldAlgorithm = oldAlgorithm
@@ -195,6 +195,7 @@ class HashEmbedding(nn.Module):
                                               self.embedding_dim,
                                               padding_idx=self.padding_idx)
 
+        mask_zero = True if (padding_idx is not None) and (padding_idx == 0) else False
         hashFamily = HashFamily(self.num_buckets, mask_zero=mask_zero)
         self.hashes = hashFamily.draw_hashes(self.num_hashes)
 

@@ -304,7 +304,10 @@ class SenseCodeTrainer(LightningModule):
         # conditional probability
         _, t_code_probs = self._model._predict(**batch)
         # sense code generation and its probability
-        t_codes_greedy, t_code_probs_greedy = self._model._encode(**batch)
+        if self._model.input_sense_code_prefix:
+            t_codes_greedy = None
+        else:
+            t_codes_greedy, t_code_probs_greedy = self._model._encode(**batch)
 
         # (required) supervised loss
         loss_supervised = self._loss_supervised.forward(target_codes=t_target_codes, input_code_probabilities=t_code_probs)
