@@ -13,6 +13,15 @@ from torch import nn
 import math
 
 
+class HashEmbeddingsLogits(torch.nn.Module):
+
+    def __init__(self, n_digits: int, n_prefix: int, n_ary_out: int, n_dim_emb: int,
+                 dimensionality_reduction: bool = True,
+                 **kwargs):
+
+        super().__init__()
+
+
 class AdditiveCodeAwareLogits(torch.nn.Module):
 
     def __init__(self, n_digits: int, n_ary_in: int, n_ary_out: int, n_dim_emb: int,
