@@ -385,7 +385,7 @@ class TransformerEncoder(BaseEncoder):
         if self._input_sense_code_prefix:
             cfg_emb_layer["num_embeddings"] = self._n_synset_code_prefix + 1 # vocabulary size will be distinct number of sense code prefixes.
         else:
-            cfg_emb_layer["num_embeddings"] = self._n_ary + len(self._pos_tagset), # n_pos will be used for beginning-of-sense-code symbol.
+            cfg_emb_layer["num_embeddings"] = self._n_ary + len(self._pos_tagset) # n_pos will be used for beginning-of-sense-code symbol.
 
         if self._embedding_layer_type == "default":
             self._emb_layer = PositionAwareEmbedding(n_seq_len=None, **cfg_emb_layer)
@@ -632,8 +632,14 @@ class TransformerEncoder(BaseEncoder):
                 input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=None)
             else:
                 input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=t_codes)
+            if self._input_sense_code_prefix:
+                feature_sequence = self.synset_code_to_prefix_ids(input_sequence)
+            else:
+                feature_sequence = input_sequence
+
             # t_code_probs_upto_d: (n_batch, digit+1, n_ary)
             _, t_code_probs_upto_d = self.forward_base(input_sequence=input_sequence,
+                                                       feature_sequence=feature_sequence,
                                                        entity_embeddings=entity_embeddings,
                                                        entity_sequence_mask=entity_sequence_mask,
                                                        context_embeddings=context_embeddings,
@@ -692,7 +698,6 @@ class TransformerEncoder(BaseEncoder):
                 feature_sequence = ground_truth_synset_code_prefixes
             else:
                 feature_sequence = input_sequence
-            print(feature_sequence)
             return self.forward_base(input_sequence=input_sequence,
                                      feature_sequence=feature_sequence,
                                      entity_embeddings=entity_embeddings,
