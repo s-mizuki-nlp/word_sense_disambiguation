@@ -137,6 +137,7 @@ class WSDTaskDataset(IterableDataset):
                 if self._n_ancestor_hop_of_ground_truth_synset == 0:
                     obj_entity["ground_truth_synset_id"] = synset_ids[0]
                     obj_entity["ground_truth_synset_code"] = synset_codes[0]
+                    obj_entity["ground_truth_synset_code_prefix"] = self.synset_dataset.synset_code_to_prefix_ids(synset_code=synset_codes[0], pos=pos, trim=True, pad=True)
                     obj_entity["ground_truth_lexname"] = lexnames[0]
                 else:
                     lst_ancestor_synsets = self.synset_dataset.get_ancestor_synsets(synset_ids[0])
@@ -147,6 +148,7 @@ class WSDTaskDataset(IterableDataset):
                     ancestor_synset = lst_ancestor_synsets[idx]
                     obj_entity["ground_truth_synset_id"] = ancestor_synset["id"]
                     obj_entity["ground_truth_synset_code"] = ancestor_synset["code"]
+                    obj_entity["ground_truth_synset_code_prefix"] = self.synset_dataset.synset_code_to_prefix_ids(synset_code=ancestor_synset["code"], pos=pos, trim=True, pad=True)
                     obj_entity["ground_truth_lexname"] = ancestor_synset["lexname"]
 
             else: # evaluation dataset -> dataset.evalution.WSDEvaluationDataset
@@ -298,6 +300,7 @@ class WSDTaskDatasetCollateFunction(object):
         if self._is_trainset:
             # ground truth: synset code
             dict_ret["ground_truth_synset_codes"] = torch.tensor(_list_of("ground_truth_synset_code"), dtype=torch.long, device=device)
+            dict_ret["ground_truth_synset_code_prefixes"] = torch.tensor(_list_of("ground_truth_synset_code_prefix"), dtype=torch.long, device=device)
             dict_ret["ground_truth_synset_ids"] = _list_of("ground_truth_synset_id")
 
         # other attributes are accumulated as `records` object.

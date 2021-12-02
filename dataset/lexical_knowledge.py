@@ -244,7 +244,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
 
         # 2. record sense code prefix info
         n_digits = self.n_digits
-        index = 0
+        index = 1
         for record in self:
             pos = record["pos"]
             sense_code = record["code"]
@@ -379,6 +379,8 @@ class SynsetDataset(NDJSONDataset, Dataset):
 
     @property
     def n_synset_code_prefix(self):
+        # synset code接頭辞の異なり数．n_synset以上の値になる．
+        # n_synsetとは必ずしも一致しない．codingの際にひとつの分岐を2桁以上で表現しうるためである．
         return len(self._sense_code_taxonomy)
 
     @property
