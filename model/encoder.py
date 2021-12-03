@@ -395,7 +395,7 @@ class TransformerEncoder(BaseEncoder):
             cfg_hashemb = copy.deepcopy(cfg_emb_layer)
             cfg_hashemb["num_hashes"] = 2
             cfg_hashemb["embedding_dim"] = cfg_hashemb["embedding_dim"] - cfg_hashemb["num_hashes"]
-            cfg_hashemb["num_buckets"] = 1000
+            cfg_hashemb["num_buckets"] = self._kwargs.get("num_buckets", 10000)
             del cfg_hashemb["max_norm"]
             self._emb_layer = HashEmbedding(**cfg_hashemb)
         else:
