@@ -486,13 +486,13 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
 class CrossEntropyLossWrapper(L.CrossEntropyLoss):
 
-    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.Tensor) -> torch.Tensor:
+    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.Tensor, eps=1E-15) -> torch.Tensor:
         """
 
         @param input_code_probabilities: shape: (n_batch, n_digits, n_ary). t[b,d,a] = P(C_d=a|x_b)
         @param target_codes: shape: (n_batch, n_digits). t[b,d] = c_d \in {0,1,...,n_ary-1}
         """
-        input_score = torch.log(input_code_probabilities).swapaxes(1,2)
+        input_score = torch.log(input_code_probabilities + eps).swapaxes(1,2)
 
         return super().forward(input_score, target_codes)
 
