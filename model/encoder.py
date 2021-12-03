@@ -13,7 +13,10 @@ from torch.nn.utils.rnn import pad_sequence
 
 from .onmt.global_attention import GlobalAttention
 from .encoder_internal import \
-    PositionAwareEmbedding, HashCodeAwareEmbedding, PositionAwareLogits, PositionalEncoding, AdditiveCodeAwareLogits, HashCodeAwareLogits
+    PositionalEncoding
+from .logit_layer import HashCodeAwareLogits, AdditiveCodeAwareLogits, PositionAwareLogits
+from .embedding_layer import HashCodeAwareEmbedding, PositionAwareEmbedding
+
 
 class BaseEncoder(nn.Module):
 

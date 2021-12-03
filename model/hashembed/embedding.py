@@ -50,7 +50,7 @@ class SequenceHashFunctionConstructor():
         n_seq_len = x_2d.shape[-1]
         assert n_seq_len <= len(self.hash_functions), f"too long sequence: {n_seq_len} > {self.max_seq_len}"
 
-        t_seq = torch.stack([hash_function(x_n) for hash_function, x_n in zip(self.hash_functions, x_2d.swapaxes(0,1))], dim=-1)
+        t_seq = torch.stack([hash_function(x_n) for hash_function, x_n in zip(self.hash_functions[:n_seq_len], x_2d.swapaxes(0,1))], dim=-1)
         if self.mask_zero:
             t_hash_values = t_seq.cumprod(dim=-1) % (self.bins -1) + 1
         else:
