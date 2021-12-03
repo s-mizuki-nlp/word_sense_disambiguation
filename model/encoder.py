@@ -12,9 +12,8 @@ from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
 
 from .onmt.global_attention import GlobalAttention
-from .hashembed.embedding import HashEmbedding
 from .encoder_internal import \
-    PositionAwareEmbedding, PositionAwareLogits, PositionalEncoding, AdditiveCodeAwareLogits
+    PositionAwareEmbedding, HashCodeAwareEmbedding, PositionAwareLogits, PositionalEncoding, AdditiveCodeAwareLogits, HashCodeAwareLogits
 
 class BaseEncoder(nn.Module):
 
@@ -317,7 +316,6 @@ class TransformerEncoder(BaseEncoder):
                  num_decoder_layers: int,
                  n_head: int,
                  pos_tagset: Iterable[str],
-                 input_sense_code_prefix: bool = False,
                  n_synset_code_prefix: Optional[int] = None,
                  memory_encoder_input_feature: str = "entity",
                  layer_normalization: bool = False,
@@ -342,16 +340,11 @@ class TransformerEncoder(BaseEncoder):
         else:
             memory_encoder_input_feature = None
 
-        if input_sense_code_prefix:
-            assert n_synset_code_prefix is not None, f"`n_synset_code_prefix` is required when `input_sense_code_prefix=True`"
-            assert embedding_layer_type == "hash", f"`embedding_layer_type='hash'` is required when `input_sense_code_prefix=True`"
-
         self._n_dim_hidden = n_dim_emb
         self._n_digits = n_digits
         # self._n_ary = n_ary
         self._n_synset_code_prefix = n_synset_code_prefix
         self._pos_tagset = sorted(list(pos_tagset))
-        self._input_sense_code_prefix = input_sense_code_prefix
         self._num_encoder_layers = num_encoder_layers
         self._memory_encoder_input_feature = memory_encoder_input_feature
         self._num_decoder_layers = num_decoder_layers
@@ -380,24 +373,21 @@ class TransformerEncoder(BaseEncoder):
         cfg_emb_layer = {
             "embedding_dim":self._n_dim_hidden,
             "max_norm":1.0 if self._norm_digit_embeddings else None,
-            "padding_idx":0 if self._ignore_trailing_zero_digits else None
+            "padding_idx":0 if self._ignore_trailing_zero_digits else None,
+            "num_embeddings": self._n_ary + len(self._pos_tagset) # n_pos will be used for beginning-of-sense-code symbol.
         }
-        if self._input_sense_code_prefix:
-            cfg_emb_layer["num_embeddings"] = self._n_synset_code_prefix + 1 # vocabulary size will be distinct number of sense code prefixes.
-        else:
-            cfg_emb_layer["num_embeddings"] = self._n_ary + len(self._pos_tagset) # n_pos will be used for beginning-of-sense-code symbol.
-
         if self._embedding_layer_type == "default":
             self._emb_layer = PositionAwareEmbedding(n_seq_len=None, **cfg_emb_layer)
         elif self._embedding_layer_type == "position_aware":
             self._emb_layer = PositionAwareEmbedding(n_seq_len=self._n_digits, **cfg_emb_layer)
         elif self._embedding_layer_type == "hash":
-            cfg_hashemb = copy.deepcopy(cfg_emb_layer)
-            cfg_hashemb["num_hashes"] = 2
-            cfg_hashemb["embedding_dim"] = cfg_hashemb["embedding_dim"] - cfg_hashemb["num_hashes"]
-            cfg_hashemb["num_buckets"] = self._kwargs.get("num_buckets", 10000)
-            del cfg_hashemb["max_norm"]
-            self._emb_layer = HashEmbedding(**cfg_hashemb)
+            self._emb_layer = HashCodeAwareEmbedding(n_seq_len=self._n_digits,
+                                                     num_buckets=self._kwargs.get("num_buckets", 10000),
+                                                     num_embeddings=self._n_synset_code_prefix+1,
+                                                     num_hashes=self._kwargs.get("num_hashes", 2),
+                                                     embedding_dim=self._n_dim_hidden,
+                                                     append_weight=True
+                                                     )
         else:
             raise AssertionError(f"unknown `embedding_layer_type` value: {self._embedding_layer_type}")
 
@@ -438,7 +428,7 @@ class TransformerEncoder(BaseEncoder):
         decoder_layer = nn.TransformerDecoderLayer(**cfg_transformer_decoder_layer)
         self._decoder = nn.TransformerDecoder(decoder_layer, num_layers=self._num_decoder_layers, norm=norm)
 
-        # logits layer
+        # logit layer
         if self._logit_layer_type == "default":
             self._softmax_logit_layer = PositionAwareLogits(n_seq_len=None, in_features=self._n_dim_hidden, out_features=self._n_ary)
         elif self._logit_layer_type == "position_aware":
@@ -453,19 +443,20 @@ class TransformerEncoder(BaseEncoder):
                                                                 max_norm=cfg_emb_layer["max_norm"],
                                                                 padding_idx=cfg_emb_layer["padding_idx"])
         elif self._logit_layer_type == "hash":
-            raise AssertionError(f"`logit_layer_type='hash'` is not supported yet.")
+            self._softmax_logit_layer = HashCodeAwareLogits(num_buckets=self._kwargs.get("num_buckets", 10000),
+                                                            num_embeddings=self._n_synset_code_prefix+1,
+                                                            num_hashes=self._kwargs.get("num_hashes", 2),
+                                                            embedding_dim=self._n_dim_hidden,
+                                                            n_digits=self._n_digits, n_ary_out=self._n_ary,
+                                                            append_weight=False)
         else:
             raise AssertionError(f"unknown `logit_layer_type` value: {self._logit_layer_type}")
 
         self._init_weights()
 
     def _init_weights(self):
-        if isinstance(self._emb_layer, HashEmbedding):
-            self._emb_layer.reset_parameters()
-        else:
-            initrange = 0.1
-            self._emb_layer.init_weights(-initrange, initrange)
-
+        initrange = 0.1
+        self._emb_layer.init_weights(-initrange, initrange)
         self._softmax_logit_layer.init_weights()
 
     def create_sequence_inputs(self, lst_pos: List[str], device,
@@ -545,7 +536,6 @@ class TransformerEncoder(BaseEncoder):
         return memory
 
     def forward_base(self, input_sequence: torch.Tensor,
-                     feature_sequence: torch.Tensor,
                      entity_embeddings: torch.Tensor,
                      entity_sequence_mask: torch.Tensor,
                      apply_autoregressive_mask: bool,
@@ -556,7 +546,6 @@ class TransformerEncoder(BaseEncoder):
         """
 
         @param input_sequence: (n_batch, <=n_digits). sequence of the input codes.
-        @param feature_sequence: (n_batch, <=n_digits). sequence of the feature codes it depends on input_sense_code_prefix attribute.
         @param entity_embeddings: (n_batch, max(entity_span), n_emb). stack of the subword embeddings within entity span.
         @param entity_sequence_mask: (n_batch, max(entity_span)). mask of the entity embeddings.
         @param apply_autoregressive_mask: autoregressive (=left-to-right) prediction (True) or not (False)
@@ -567,7 +556,7 @@ class TransformerEncoder(BaseEncoder):
         n_digits = min(self._n_digits, input_sequence.shape[-1])
 
         # compute target embeddings: (n_batch, n_digits, n_dim_emb)
-        t_emb = self._emb_layer.forward(feature_sequence) * math.sqrt(self._n_dim_hidden)
+        t_emb = self._emb_layer.forward(input_sequence) * math.sqrt(self._n_dim_hidden)
         tgt = self._pe_layer.forward(t_emb)
 
         # prepare memory embeddings and masks
@@ -595,10 +584,7 @@ class TransformerEncoder(BaseEncoder):
 
         # compute Pr{Y_d|y_{<d}}
         # t_code_probs: (n_batch, n_digits, n_ary)
-        if self._logit_layer_type in ("default", "position_aware"):
-            t_logits = self._softmax_logit_layer(t_representation=h_out)
-        elif self._logit_layer_type == "additive":
-            t_logits = self._softmax_logit_layer(t_representation=h_out, input_sequence=input_sequence)
+        t_logits = self._softmax_logit_layer(t_representation=h_out, input_sequence=input_sequence)
         t_code_prob = F.softmax(t_logits, dim=-1)
 
         # adjust Pr{c_d=d|c_{<d}} so that Pr{c_d=0|c_{<d+1}} satisfies monotone increasing condition.
@@ -632,14 +618,9 @@ class TransformerEncoder(BaseEncoder):
                 input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=None)
             else:
                 input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=t_codes)
-            if self._input_sense_code_prefix:
-                feature_sequence = self.synset_code_to_prefix_ids(input_sequence)
-            else:
-                feature_sequence = input_sequence
 
             # t_code_probs_upto_d: (n_batch, digit+1, n_ary)
             _, t_code_probs_upto_d = self.forward_base(input_sequence=input_sequence,
-                                                       feature_sequence=feature_sequence,
                                                        entity_embeddings=entity_embeddings,
                                                        entity_sequence_mask=entity_sequence_mask,
                                                        context_embeddings=context_embeddings,
@@ -678,8 +659,6 @@ class TransformerEncoder(BaseEncoder):
             on_generation = False
 
         if on_generation:
-            if self._input_sense_code_prefix:
-                raise AssertionError(f"generation is not supported when `input_sense_code_prefix=True`")
             # if ground-truth is not given, it generates sense code from scratch.
             return self.forward_greedy_decoding(pos=pos,
                                                 entity_embeddings=entity_embeddings,
@@ -694,12 +673,7 @@ class TransformerEncoder(BaseEncoder):
             dtype, device = self._dtype_and_device(entity_embeddings)
             input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device,
                                                          ground_truth_synset_codes=ground_truth_synset_codes)
-            if self._input_sense_code_prefix:
-                feature_sequence = ground_truth_synset_code_prefixes
-            else:
-                feature_sequence = input_sequence
             return self.forward_base(input_sequence=input_sequence,
-                                     feature_sequence=feature_sequence,
                                      entity_embeddings=entity_embeddings,
                                      entity_sequence_mask=entity_sequence_mask,
                                      context_embeddings=context_embeddings,
@@ -744,10 +718,6 @@ class TransformerEncoder(BaseEncoder):
     def teacher_forcing(self):
         return True
 
-    @property
-    def input_sense_code_prefix(self):
-        return self._input_sense_code_prefix
-
     def summary(self):
         ret = {
             "class_name": self.__class__.__name__,
@@ -761,6 +731,5 @@ class TransformerEncoder(BaseEncoder):
             "logit_layer_type": self._logit_layer_type,
             "embedding_layer_type": self._embedding_layer_type,
             "n_synset_code_prefix": self.n_synset_code_prefix,
-            "input_sense_code_prefix": self._input_sense_code_prefix,
         }
         return ret

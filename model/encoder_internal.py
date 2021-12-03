@@ -52,14 +52,15 @@ class HashCodeAwareEmbedding(BaseHashCode):
 
     def __init__(self, n_seq_len: int, num_embeddings: int, embedding_dim: int, num_buckets: int,
                  num_hashes: int = 2, n_prefix_hash_bins: int = int(1E14), pad_trailing_zeroes: bool = True,
+                 append_weight: bool = True,
                  **kwargs):
 
         super().__init__(n_prefix_hash_bins=n_prefix_hash_bins, max_seq_len=n_seq_len,
                          pad_trailing_zeroes=pad_trailing_zeroes, random_seed=42, mask_zero=True)
 
         self.emb_layer = HashEmbedding(num_embeddings=num_embeddings, num_hashes=num_hashes,
-                                       embedding_dim=embedding_dim - num_hashes,
-                                       num_buckets=num_buckets, append_weight=True,
+                                       embedding_dim=embedding_dim - num_hashes if append_weight else embedding_dim,
+                                       num_buckets=num_buckets, append_weight=append_weight,
                                        **kwargs)
         self.n_seq_len = n_seq_len
 
@@ -83,6 +84,7 @@ class HashCodeAwareLogits(BaseHashCode):
     def __init__(self, n_digits: int, n_ary_out: int,
                  num_embeddings: int, embedding_dim: int, num_buckets: int, num_hashes=2,
                  n_prefix_hash_bins: int = int(1E14), pad_trailing_zeroes: bool = True,
+                 append_weight: bool = False,
                  **kwargs):
 
         super().__init__(n_prefix_hash_bins=n_prefix_hash_bins, max_seq_len=n_digits,
@@ -94,8 +96,8 @@ class HashCodeAwareLogits(BaseHashCode):
 
         # prefix hash から HashEmbeddingsを使って n_ary * n_dim_emb 個のparameterをlookupする
         self._logit_layer_weights = HashEmbedding(num_embeddings=num_embeddings, num_hashes=num_hashes,
-                                                  embedding_dim=embedding_dim * n_ary_out,
-                                                  num_buckets=num_buckets, append_weight=False,
+                                                  embedding_dim=embedding_dim*n_ary_out - num_hashes if append_weight else embedding_dim*n_ary_out,
+                                                  num_buckets=num_buckets, append_weight=append_weight,
                                                   **kwargs)
 
     def forward(self, input_sequence: torch.Tensor, t_representation: torch.Tensor):

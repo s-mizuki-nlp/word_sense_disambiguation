@@ -76,10 +76,6 @@ class HierarchicalCodeEncoder(nn.Module):
     def has_discretizer(self):
         return self._encoder.has_discretizer
 
-    @property
-    def input_sense_code_prefix(self):
-        return self._encoder.input_sense_code_prefix
-
     def summary(self, include_submodules: bool = False, flatten: bool = False):
         ret = {
             "n_ary": self.n_ary,
