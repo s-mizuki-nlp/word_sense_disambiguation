@@ -26,7 +26,7 @@ class HashCodeAwareEmbedding(BaseHashCode):
         self.n_seq_len = n_seq_len
 
     def init_weights(self, *args, **kwargs):
-        self.emb_layer.reset_parameters()
+        self.emb_layer.reset_parameters(std=0.1)
 
     def forward(self, input_sequence: torch.Tensor) -> torch.Tensor:
         # input_sequence: (n_batch, n_digits_so_far)

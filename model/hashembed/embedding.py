@@ -287,7 +287,7 @@ class HashEmbedding(nn.Module):
     def _aggregate_median(self, tensor):
         return torch.median(tensor, dim=-1)[0]
 
-    def reset_parameters(self):
+    def reset_parameters(self, std: float = 0.1):
         """Resets the trainable parameters."""
         def set_constant_row(parameters, iRow=0, value=0):
             """Return `parameters` with row `iRow` as s constant `value`."""
@@ -299,7 +299,7 @@ class HashEmbedding(nn.Module):
         if self.seed is not None:
             torch.manual_seed(self.seed)
 
-        self.shared_embeddings.weight = torch.nn.init.normal_(self.shared_embeddings.weight, mean=0.0, std=0.1)
+        self.shared_embeddings.weight = torch.nn.init.normal_(self.shared_embeddings.weight, mean=0.0, std=std)
         self.importance_weights.weight = torch.nn.init.normal_(self.importance_weights.weight, mean=0.0, std=0.0005)
 
         if self.padding_idx is not None:

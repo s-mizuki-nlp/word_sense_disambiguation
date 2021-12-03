@@ -51,7 +51,7 @@ class HashCodeAwareLogits(BaseHashCode):
         return t_logits
 
     def init_weights(self, *args, **kwargs):
-        self._logit_layer_weights.reset_parameters()
+        self._logit_layer_weights.reset_parameters(std=0.00001)
 
 
 class AdditiveCodeAwareLogits(torch.nn.Module):
