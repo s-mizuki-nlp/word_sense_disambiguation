@@ -37,12 +37,15 @@ class BaseHashCode(torch.nn.Module):
 
         # sequence_inputs: (n_batch, n_digits)
         # prefix_ids: (n_batch, n_digits)
+        n_digits = sequences.shape[-1]
         prefix_ids = self._sequence_hash_function(sequences)
 
         if self._pad_trailing_zeroes:
             # pad trailing zeroes with last prefix ids.
             n_code_lengths = (sequences != 0).sum(dim=-1)
             for idx, code_length in enumerate(n_code_lengths):
+                if code_length >= n_digits:
+                    continue
                 prefix_ids[idx, code_length:] = prefix_ids[idx, code_length-1]
 
         return prefix_ids
@@ -64,7 +67,7 @@ class HashCodeAwareEmbedding(BaseHashCode):
                                        **kwargs)
         self.n_seq_len = n_seq_len
 
-    def init_weights(self, **kwargs):
+    def init_weights(self, *args, **kwargs):
         self.emb_layer.reset_parameters()
 
     def forward(self, input_sequence: torch.Tensor) -> torch.Tensor:
@@ -112,13 +115,13 @@ class HashCodeAwareLogits(BaseHashCode):
         t_weight_ = self._logit_layer_weights.forward(input_sequence_prefix_hashes)
 
         # t_weight: (n_batch, n_digits_so_far, n_ary_out, n_dim)
-        t_weight = t_weight_.view((-1, n_digits_so_far, self._n_ary_out, self._n_dim_emb))
+        t_weight = t_weight_.view((-1, n_digits_so_far, self._n_ary, self._n_dim_emb))
         # t_logits: (n_batch, n_digits_so_far, n_ary_out)
         t_logits = torch.matmul(t_weight, t_representation.unsqueeze(-1)).squeeze(-1)
 
         return t_logits
 
-    def init_weights(self, **kwargs):
+    def init_weights(self, *args, **kwargs):
         self._logit_layer_weights.reset_parameters()
 
 

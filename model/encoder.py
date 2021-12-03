@@ -648,12 +648,11 @@ class TransformerEncoder(BaseEncoder):
                 context_embeddings: Optional[torch.Tensor] = None,
                 context_sequence_mask: Optional[torch.Tensor] = None,
                 ground_truth_synset_codes: Optional[torch.Tensor] = None,
-                ground_truth_synset_code_prefixes: Optional[torch.Tensor] = None,
                 subword_spans: List[List[List[int]]] = None,
                 on_inference: bool = False,
                 **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
 
-        if on_inference and (ground_truth_synset_codes is None) and (ground_truth_synset_code_prefixes is None):
+        if on_inference and (ground_truth_synset_codes is None):
             on_generation = True
         else:
             on_generation = False
