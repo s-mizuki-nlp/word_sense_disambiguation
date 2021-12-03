@@ -1,6 +1,6 @@
 from __future__ import unicode_literals, division
 
-from typing import List, Callable
+from typing import List, Callable, Optional
 
 import numpy as np
 
@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 
 
-class HashFunction():
+class HashFunctionConstructor():
 
     def __init__(self, a:int, b:int, bins:int, moduler: int, mask_zero: bool):
         self.a = a
@@ -27,6 +27,35 @@ class HashFunction():
             return ((self.a * x + self.b) % self.moduler) % self.bins
 
 
+class SequenceHashFunctionConstructor():
+
+    def __init__(self, a:int, b:int, max_seq_len:int, bins:int, moduler: int, mask_zero: bool):
+        self.a = a
+        self.b = b
+        self.max_seq_len = max_seq_len
+        self.bins = bins
+        self.moduler = moduler
+        self.mask_zero = mask_zero
+        self.hash_functions = [HashFunctionConstructor(a=a*(n+1)+1, b=b*(n+1)+1, bins=bins, moduler=moduler, mask_zero=True) for n in range(max_seq_len)]
+
+    def __call__(self, x_2d: torch.Tensor):
+        """
+        it emits hash value for input sequence.
+        specifically, let r as returned variable and r[b,n] = hash(x_2d[b,:n]).
+
+        @param x_2d: two-dimensional LongTensor. (n_batch, n_seq_len)
+        @output: two-dimensional LongTensor. (n_batch, n_seq_len)
+        """
+
+        t_seq = torch.stack([hash_function(x_n) for hash_function, x_n in zip(self.hash_functions, x_2d.swapaxes(0,1))], dim=-1)
+        if self.mask_zero:
+            t_hash_values = t_seq.cumprod(dim=-1) % (self.bins -1) + 1
+        else:
+            t_hash_values = t_seq.cumprod(dim=-1) % self.bins
+
+        return t_hash_values
+
+
 class HashFamily():
     r"""Universal hash family as proposed by Carter and Wegman.
 
@@ -42,13 +71,21 @@ class HashFamily():
         moduler (int,optional): Temporary hashing. Has to be a prime number.
     """
 
-    def __init__(self, bins, mask_zero=False, moduler=None):
+    def __init__(self, bins, mask_zero=False, moduler=None, is_sequence_input: bool = False, max_seq_len: Optional[int] = None, random_seed: int = 42):
         if moduler and moduler <= bins:
             raise ValueError("p (moduler) should be >> m (buckets)")
 
+        if is_sequence_input:
+            assert isinstance(max_seq_len, int), f"you must specify `max_seq_len` argument."
+
+        self.random_seed = random_seed
+
         self.bins = bins
-        self.moduler = moduler if moduler else self._next_prime(np.random.randint(self.bins + 1, 2**32))
+        np.random.seed(random_seed)
+        self.moduler = moduler if moduler else self._next_prime(np.random.randint(self.bins + 1, int(1E15)))
         self.mask_zero = mask_zero
+        self.is_sequence_input = is_sequence_input
+        self.max_seq_len = max_seq_len
 
         # do not allow same a and b, as it could mean shifted hashes
         self.sampled_a = set()
@@ -71,19 +108,25 @@ class HashFamily():
     def draw_hash(self, a=None, b=None):
         """Draws a single hash function from the family."""
         if a is None:
+            np.random.seed(self.random_seed)
             while a is None or a in self.sampled_a:
                 a = np.random.randint(1, self.moduler - 1)
                 assert len(self.sampled_a) < self.moduler - 2, "please give a bigger moduler"
 
             self.sampled_a.add(a)
         if b is None:
+            np.random.seed(self.random_seed)
             while b is None or b in self.sampled_b:
                 b = np.random.randint(0, self.moduler - 1)
                 assert len(self.sampled_b) < self.moduler - 1, "please give a bigger moduler"
 
             self.sampled_b.add(b)
 
-        return HashFunction(a=a, b=b, bins=self.bins, moduler=self.moduler, mask_zero=self.mask_zero)
+        if self.is_sequence_input:
+            return SequenceHashFunctionConstructor(a=a, b=b, bins=self.bins, max_seq_len=self.max_seq_len,
+                                                   moduler=self.moduler, mask_zero=self.mask_zero)
+        else:
+            return HashFunctionConstructor(a=a, b=b, bins=self.bins, moduler=self.moduler, mask_zero=self.mask_zero)
 
     def draw_hashes(self, n, **kwargs) -> List[Callable[[torch.Tensor], torch.Tensor]]:
         """Draws n hash function from the family."""
