@@ -12,14 +12,79 @@ import torch
 from torch import nn
 import math
 
+from .hashembed.embedding import HashFamily, HashEmbedding
 
-class HashEmbeddingsLogits(torch.nn.Module):
+class BaseHashCode(torch.nn.Module):
 
-    def __init__(self, n_digits: int, n_prefix: int, n_ary_out: int, n_dim_emb: int,
-                 dimensionality_reduction: bool = True,
+    def __init__(self, n_prefix_hash_bins: int, max_seq_len: int, pad_trailing_zeroes: bool, random_seed: int = 42, mask_zero: bool=True):
+        super().__init__()
+
+        self._sequence_hash_function = HashFamily(bins=n_prefix_hash_bins, mask_zero=mask_zero, is_sequence_input=True,
+                                                  max_seq_len=max_seq_len, random_seed=random_seed).draw_hash()
+        self._pad_trailing_zeroes = pad_trailing_zeroes
+
+    def transform_sequence_to_prefix_hashes(self, sequences: torch.Tensor):
+        """
+        this function transform sense codes to the prefix ids of sense codes.
+        then, optionally, pads zeroes with last hash values.
+        e.g.,
+            hash([[1,2,0]]) -> [[hash(1), hash([1,2]), hash([1,2,0])]] if pad = False
+            hash([[1,2,0]]) -> [[hash(1), hash([1,2]), hash([1,2])]] if pad = True
+        by using fixed random seed and bins, you can obtain identical hash function every time.
+
+        @param sequences: sequence to be hashed.
+        """
+
+        # sequence_inputs: (n_batch, n_digits)
+        # prefix_ids: (n_batch, n_digits)
+        prefix_ids = self._sequence_hash_function(sequences)
+
+        if self._pad_trailing_zeroes:
+            # pad trailing zeroes with last prefix ids.
+            n_code_lengths = (sequences != 0).sum(dim=-1)
+            for idx, code_length in enumerate(n_code_lengths):
+                prefix_ids[idx, code_length:] = prefix_ids[idx, code_length-1]
+
+        return prefix_ids
+
+
+class HashCodeAwareLogits(BaseHashCode):
+
+    def __init__(self, n_digits: int, n_ary_out: int,
+                 num_embeddings: int, embedding_dim: int, num_buckets: int, num_hashes=2,
+                 n_prefix_hash_bins: int = int(1E14), pad_trailing_zeroes: bool = True,
                  **kwargs):
 
-        super().__init__()
+        super().__init__(n_prefix_hash_bins=n_prefix_hash_bins, max_seq_len=n_digits,
+                         pad_trailing_zeroes=pad_trailing_zeroes, random_seed=42, mask_zero=True)
+        self._n_digits = n_digits
+        self._n_ary = n_ary_out
+        self._n_dim_emb = embedding_dim
+        self._n_distinc_prefix = num_embeddings
+
+        # prefix hash から HashEmbeddingsを使って n_ary * n_dim_emb 個のparameterをlookupする
+        self._logit_layer_weights = HashEmbedding(num_embeddings=num_embeddings, num_hashes=num_hashes,
+                                                  embedding_dim=embedding_dim * n_ary_out,
+                                                  num_buckets=num_buckets, append_weight=False,
+                                                  **kwargs)
+
+    def forward(self, input_sequence: torch.Tensor, t_representation: torch.Tensor):
+        # input_sequence: (n_batch, n_digits_so_far) input_sequence[b,d] \in {0,n_ary_in}
+        # t_representation: (n_batch, n_digits_so_far, n_dim)
+
+        n_digits_so_far = min(self._n_digits, input_sequence.shape[-1])
+
+        # input_sequence_prefix_hashes: (n_batch, n_digits_so_far)
+        input_sequence_prefix_hashes = self.transform_sequence_to_prefix_hashes(input_sequence)
+        # t_weight_: (n_batch, n_digits_so_far, n_ary_out * n_dim)
+        t_weight_ = self._logit_layer_weights.forward(input_sequence_prefix_hashes)
+
+        # t_weight: (n_batch, n_digits_so_far, n_ary_out, n_dim)
+        t_weight = t_weight_.view((-1, n_digits_so_far, self._n_ary_out, self._n_dim_emb))
+        # t_logits: (n_batch, n_digits_so_far, n_ary_out)
+        t_logits = torch.matmul(t_weight, t_representation.unsqueeze(-1)).squeeze(-1)
+
+        return t_logits
 
 
 class AdditiveCodeAwareLogits(torch.nn.Module):
