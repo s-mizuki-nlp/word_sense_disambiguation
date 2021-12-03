@@ -48,6 +48,36 @@ class BaseHashCode(torch.nn.Module):
         return prefix_ids
 
 
+class HashCodeAwareEmbedding(BaseHashCode):
+
+    def __init__(self, n_seq_len: int, num_embeddings: int, embedding_dim: int, num_buckets: int,
+                 num_hashes: int = 2, n_prefix_hash_bins: int = int(1E14), pad_trailing_zeroes: bool = True,
+                 **kwargs):
+
+        super().__init__(n_prefix_hash_bins=n_prefix_hash_bins, max_seq_len=n_seq_len,
+                         pad_trailing_zeroes=pad_trailing_zeroes, random_seed=42, mask_zero=True)
+
+        self.emb_layer = HashEmbedding(num_embeddings=num_embeddings, num_hashes=num_hashes,
+                                       embedding_dim=embedding_dim - num_hashes,
+                                       num_buckets=num_buckets, append_weight=True,
+                                       **kwargs)
+        self.n_seq_len = n_seq_len
+
+    def init_weights(self, **kwargs):
+        self.emb_layer.reset_parameters()
+
+    def forward(self, input_sequence: torch.Tensor) -> torch.Tensor:
+        # input_sequence: (n_batch, n_digits_so_far)
+        assert input_sequence.ndim == 2, f"unexpected dimension size: {input_sequence.ndim}"
+
+        # input_sequence_prefix_hashes: (n_batch, n_digits_so_far)
+        input_sequence_prefix_hashes = self.transform_sequence_to_prefix_hashes(input_sequence)
+        # t_emb: (n_batch, n_digits_so_far, n_emb)
+        t_emb = self.emb_layer.forward(input_sequence_prefix_hashes)
+
+        return t_emb
+
+
 class HashCodeAwareLogits(BaseHashCode):
 
     def __init__(self, n_digits: int, n_ary_out: int,
@@ -85,6 +115,9 @@ class HashCodeAwareLogits(BaseHashCode):
         t_logits = torch.matmul(t_weight, t_representation.unsqueeze(-1)).squeeze(-1)
 
         return t_logits
+
+    def init_weights(self, **kwargs):
+        self._logit_layer_weights.reset_parameters()
 
 
 class AdditiveCodeAwareLogits(torch.nn.Module):
