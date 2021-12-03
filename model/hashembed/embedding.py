@@ -1,10 +1,30 @@
 from __future__ import unicode_literals, division
 
+from typing import List, Callable
+
 import numpy as np
 
 import torch
 import torch.nn as nn
-from torch.nn.init import normal
+
+
+class HashFunction():
+
+    def __init__(self, a:int, b:int, bins:int, moduler: int, mask_zero: bool):
+        self.a = a
+        self.b = b
+        self.bins = bins
+        self.moduler = moduler
+        self.mask_zero = mask_zero
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        if self.mask_zero:
+            # The return doesn't set 0 to 0 because that's taken into account in the hash embedding
+            # if want to use for an integer then should uncomment second line !!!!!!!!!!!!!!!!!!!!!
+            return ((self.a * x + self.b) % self.moduler) % (self.bins - 1) + 1
+            # return lambda x: 0 if x == 0 else ((a*x + b) % self.moduler) % (self.bins-1) + 1
+        else:
+            return ((self.a * x + self.b) % self.moduler) % self.bins
 
 
 class HashFamily():
@@ -63,15 +83,9 @@ class HashFamily():
 
             self.sampled_b.add(b)
 
-        if self.mask_zero:
-            # The return doesn't set 0 to 0 because that's taken into account in the hash embedding
-            # if want to use for an integer then should uncomment second line !!!!!!!!!!!!!!!!!!!!!
-            return lambda x: ((a * x + b) % self.moduler) % (self.bins - 1) + 1
-            # return lambda x: 0 if x == 0 else ((a*x + b) % self.moduler) % (self.bins-1) + 1
-        else:
-            return lambda x: ((a * x + b) % self.moduler) % self.bins
+        return HashFunction(a=a, b=b, bins=self.bins, moduler=self.moduler, mask_zero=self.mask_zero)
 
-    def draw_hashes(self, n, **kwargs):
+    def draw_hashes(self, n, **kwargs) -> List[Callable[[torch.Tensor], torch.Tensor]]:
         """Draws n hash function from the family."""
         return [self.draw_hash() for i in range(n)]
 
@@ -200,15 +214,15 @@ class HashEmbedding(nn.Module):
         self.hashes = hashFamily.draw_hashes(self.num_hashes)
 
         if aggregation_mode == 'sum':
-            self.aggregate = lambda x: torch.sum(x, dim=-1)
+            self.aggregate = self._aggregate_sum
         elif aggregation_mode == 'concatenate':
             # little bit quicker than permute/contiguous/view
-            self.aggregate = lambda x: torch.cat([x[:, :, :, i] for i in range(self.num_hashes)], dim=-1)
+            self.aggregate = self._aggregate_concat
         elif aggregation_mode == 'median':
-            print('median')
-            self.aggregate = lambda x: torch.median(x, dim=-1)[0]
+            self.aggregate = self._aggregate_median
         else:
             raise ValueError('unknown aggregation function {}'.format(aggregation_mode))
+        self.aggregation_mode = aggregation_mode
 
         self.output_dim = self.embedding_dim
         if aggregation_mode == "concatenate":
@@ -218,9 +232,16 @@ class HashEmbedding(nn.Module):
 
         self.reset_parameters()
 
-    def reset_parameters(self,
-                         init_shared=lambda x: normal(x, std=0.1),
-                         init_importance=lambda x: normal(x, std=0.0005)):
+    def _aggregate_sum(self, tensor):
+        return torch.sum(tensor, dim=-1)
+
+    def _aggregate_concat(self, tensor):
+        return torch.cat([tensor[:, :, :, i] for i in range(self.num_hashes)], dim=-1)
+
+    def _aggregate_median(self, tensor):
+        return torch.median(tensor, dim=-1)[0]
+
+    def reset_parameters(self):
         """Resets the trainable parameters."""
         def set_constant_row(parameters, iRow=0, value=0):
             """Return `parameters` with row `iRow` as s constant `value`."""
@@ -232,8 +253,8 @@ class HashEmbedding(nn.Module):
         if self.seed is not None:
             torch.manual_seed(self.seed)
 
-        self.shared_embeddings.weight = init_shared(self.shared_embeddings.weight)
-        self.importance_weights.weight = init_importance(self.importance_weights.weight)
+        self.shared_embeddings.weight = torch.nn.init.normal_(self.shared_embeddings.weight, mean=0.0, std=0.1)
+        self.importance_weights.weight = torch.nn.init.normal_(self.importance_weights.weight, mean=0.0, std=0.0005)
 
         if self.padding_idx is not None:
             # Unfortunately has to set weight to 0 even when paddingIdx = 0
