@@ -7,8 +7,8 @@ from typing import Optional
 import torch
 from torch import nn
 
-from model.encoder_internal import BaseHashCode
-from model.hashembed import HashEmbedding
+from .encoder_internal import BaseHashCode
+from .hashembed import HashEmbedding
 
 
 class HashCodeAwareLogits(BaseHashCode):
@@ -47,6 +47,13 @@ class HashCodeAwareLogits(BaseHashCode):
         t_weight = t_weight_.view((-1, n_digits_so_far, self._n_ary, self._n_dim_emb))
         # t_logits: (n_batch, n_digits_so_far, n_ary_out)
         t_logits = torch.matmul(t_weight, t_representation.unsqueeze(-1)).squeeze(-1)
+
+        # DEBUG
+        if torch.isnan(t_logits):
+            print(self.prev_logits)
+            print(t_logits)
+            raise ValueError("nan detected.")
+        self.prev_logits = t_logits
 
         return t_logits
 
