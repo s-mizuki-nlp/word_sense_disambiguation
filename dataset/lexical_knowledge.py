@@ -9,7 +9,7 @@ import nltk
 from nltk.corpus import wordnet as wn
 from .corpora import NDJSONDataset
 from .filter import DictionaryFilter
-from .utils import lemma_pos_to_tuple
+from .utils import lemma_pos_to_tuple, sequence_to_str
 
 
 class LemmaDataset(NDJSONDataset, Dataset):
@@ -187,6 +187,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
 
         self._synsets = self._setup_lexical_knowledge()
         self._sense_code_taxonomy = self._setup_sense_code_taxonomy()
+        self._sense_code_taxonomy_by_index = {record["idx"]:record for record in self._sense_code_taxonomy.values()}
 
     def _setup_wordnet(self):
         try:
@@ -197,27 +198,32 @@ class SynsetDataset(NDJSONDataset, Dataset):
     def _lowercase(self, lst_strings: List[str]):
         return [string.lower() for string in lst_strings]
 
-    def _synset_code_to_lookup_key(self, synset_code: List[int], null_key: str = ""):
+    @staticmethod
+    def synset_code_to_lookup_key(synset_code: List[int]):
         if len(synset_code) == 0:
-            return null_key
+            raise ValueError(f"`synset_code` cannot be empty.")
         else:
-            return "-".join(map(str, synset_code))
+            return sequence_to_str(synset_code)
 
     def _trim_trailing_zeroes(self, sense_code: List[int]) -> List[int]:
         n_length = len(sense_code) - sense_code.count(0)
         return sense_code[:n_length]
 
-    def _pad_trailing_zeroes(self, sense_code_prefix: List[int]) -> List[int]:
-        n_pad = self.n_digits - len(sense_code_prefix)
-        padded = sense_code_prefix + [0]*n_pad
-        return padded
+    def _transform_prefix_to_sense_code_and_pos(self, sense_code_prefix: List[int]) -> Tuple[List[int], str]:
+        pos_idx = sense_code_prefix[0]
+        pos = self._pos_index_rev[pos_idx]
+        partial_sense_code = sense_code_prefix[1:]
+
+        n_pad = self.n_digits - len(partial_sense_code)
+        padded = partial_sense_code + [0]*n_pad
+        return padded, pos
 
     def _setup_lexical_knowledge(self) -> Dict[str, Any]:
         result = {}
         for record in self:
 
             key_id = record["id"]
-            key_code = self._synset_code_to_lookup_key(record["code"])
+            key_code = self.synset_code_to_lookup_key(record["code"])
             result[key_id] = record
             result[key_code] = record
 
@@ -232,13 +238,14 @@ class SynsetDataset(NDJSONDataset, Dataset):
         for record in self:
             pos = record["pos"]
             sense_code = record["code"]
-            prefixes = self.synset_code_to_prefixes(sense_code)
-            str_prefixes = [self._synset_code_to_lookup_key(prefix, null_key=pos) for prefix in prefixes]
+            prefixes = self.synset_code_to_prefixes(sense_code, pos=pos)
+            str_prefixes = [self.synset_code_to_lookup_key(prefix) for prefix in prefixes]
             num_descendents.update(str_prefixes)
             set_pos.add(pos)
         # decrement oneself except of virtual root (lookup_key={"n","v"})
+        root_keys = {str(self.pos_to_index_mapping[pos]) for pos in set_pos}
         for key, value in num_descendents.items():
-            if key in set_pos:
+            if key in root_keys:
                 continue
             num_descendents[key] = value - 1
 
@@ -248,17 +255,17 @@ class SynsetDataset(NDJSONDataset, Dataset):
         for record in self:
             pos = record["pos"]
             sense_code = record["code"]
-            # [1,2,0,0] -> [[], [1,], [1,2]]
-            prefixes = self.synset_code_to_prefixes(sense_code)
+            # ([1,2,0,0],'n') -> [[65,], [65,1], [65,1,2]]
+            prefixes = self.synset_code_to_prefixes(sense_code, pos=pos)
             # [1,2,0,0] -> [1,2,0]
             next_values = sense_code[:len(prefixes)]
-            # append zero for no trailing zeroes
+            # append zero for full-length sense code (can be detected by len()==n_digits)
             if len(prefixes) > n_digits:
                 assert len(prefixes) == n_digits+1, f"unexpected sense code: {sense_code}"
                 next_values += [0]
             for prefix, next_value in zip(prefixes, next_values):
-                # [] -> "n" or "v", [1,2] -> "1-2"
-                lookup_key = self._synset_code_to_lookup_key(prefix, null_key=pos)
+                # [65,1,2] -> "65-1-2"
+                lookup_key = self.synset_code_to_lookup_key(prefix)
                 if lookup_key not in result:
                     result_k = {
                         "idx": index,
@@ -268,32 +275,49 @@ class SynsetDataset(NDJSONDataset, Dataset):
                         "num_descendents": num_descendents[lookup_key],
                         "is_terminal": True if num_descendents[lookup_key] == 0 else False
                     }
-                    _padded_code = self._pad_trailing_zeroes(prefix)
-                    if _padded_code in self:
-                        result_k["synset_id"] = self.__getitem__(_padded_code)["id"]
-                        result_k["code"] = _padded_code
-                    index += 1
+                    _sense_code, pos = self._transform_prefix_to_sense_code_and_pos(prefix)
+                    if _sense_code in self:
+                        result_k["synset_id"] = self.__getitem__(_sense_code)["id"]
+                        result_k["code"] = _sense_code
+                        result_k["is_virtual"] = False # this code actually grounded to the synset.
+                    else:
+                        result_k["is_virtual"] = True # this code is artificial. not grounded to the synset.
                     result[lookup_key] = result_k
+                    index += 1
 
                 result[lookup_key]["next_values"].add(next_value)
 
         # result["1-2"] = {"idx":138, "next_values": {4,1,135,...,}, "num_descendents": 16788}
         return result
 
-    def synset_code_to_prefixes(self, sense_code: List[int]) -> List[List[int]]:
+    def synset_code_to_prefixes(self, sense_code: List[int], pos: Optional[str] = None) -> List[List[int]]:
         n_length = len(sense_code) - sense_code.count(0)
-        lst_prefixes = [sense_code[:d] for d in range(n_length+1)]
+        if pos is not None:
+            lst_prefixes = [[self.pos_to_index_mapping[pos]] + sense_code[:d] for d in range(n_length+1)]
         return lst_prefixes
 
-    def lookup_synset_code_prefix(self, prefix: List[int], pos: str = None):
-        key = self._synset_code_to_lookup_key(prefix, null_key = pos)
+    def _get_synset_code_prefix_info(self, sense_code_prefix: List[int]):
+        key = self.synset_code_to_lookup_key(sense_code_prefix)
         return self._sense_code_taxonomy[key]
+
+    def get_synset_code_prefix_info(self, partial_sense_code_or_prefix_index: Union[int, List[int]], pos: Optional[str] = None):
+        """
+        return the taxonomical information (e.g., next values, number of descendents).
+        This is useful for inference including post-hoc
+
+        @rtype: object
+        """
+        if isinstance(partial_sense_code_or_prefix_index, int):
+            return self._sense_code_taxonomy_by_index[partial_sense_code_or_prefix_index]
+        else:
+            prefixes = self.synset_code_to_prefixes(sense_code=partial_sense_code_or_prefix_index, pos=pos)
+            return self._get_synset_code_prefix_info(sense_code_prefix=prefixes[-1])
 
     def synset_code_to_prefix_ids(self, synset_code: List[int], pos: str, pad: bool = False, trim: bool = False) -> List[int]:
         """
         transform the sense code to the sequence of prefix ids. returned sequence length is non-zero digits + 1.
         This is useful for path-aware embeddings.
-        i.e. code=[1,2,0,0], pos="n" -> [idx("n"), idx("1"), idx("1-2")]
+        i.e. code=[1,2,0,0], pos="n", n_ary=64 -> [idx("65"), idx("65-1"), idx("65-1-2")]
 
         @param synset_code: synset code. list of ints.
         @param pos: part-of-speech character such as "n"
@@ -301,8 +325,8 @@ class SynsetDataset(NDJSONDataset, Dataset):
         @param trim: trim if sequence length exceeds the number of digits.
         @return: sequence of prefix ids. list of ints.
         """
-        prefixes = self.synset_code_to_prefixes(synset_code)
-        lst_ids = [self.lookup_synset_code_prefix(prefix, pos=pos)["idx"] for prefix in prefixes]
+        prefixes = self.synset_code_to_prefixes(synset_code, pos=pos)
+        lst_ids = [self._get_synset_code_prefix_info(prefix)["idx"] for prefix in prefixes]
         if pad:
             n_pad = len(synset_code) - len(lst_ids)
             if n_pad > 0:
@@ -317,7 +341,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
         if isinstance(synset_id_or_synset_code, str):
             return self._synsets[synset_id_or_synset_code]
         elif isinstance(synset_id_or_synset_code, list):
-            key = self._synset_code_to_lookup_key(synset_id_or_synset_code)
+            key = self.synset_code_to_lookup_key(synset_id_or_synset_code)
             return self._synsets[key]
         else:
             raise ValueError(f"unknown key type: {type(synset_id_or_synset_code)}")
@@ -382,6 +406,20 @@ class SynsetDataset(NDJSONDataset, Dataset):
         # synset code接頭辞の異なり数．n_synset以上の値になる．
         # n_synsetとは必ずしも一致しない．codingの際にひとつの分岐を2桁以上で表現しうるためである．
         return len(self._sense_code_taxonomy)
+
+    @property
+    def pos_tagset(self):
+        return self.distinct_values(column="pos")
+
+    @property
+    def pos_to_index_mapping(self):
+        if not hasattr(self, "_pos_index"):
+            pos_index = {}
+            for idx, pos in enumerate(self.pos_tagset):
+                pos_index[pos] = self.n_ary + idx
+            self._pos_index = pos_index
+            self._pos_index_rev = {idx:pos for pos,idx in pos_index.items()}
+        return self._pos_index
 
     @property
     def verbose(self):

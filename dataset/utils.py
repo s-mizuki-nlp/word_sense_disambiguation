@@ -39,6 +39,9 @@ def lemma_pos_to_tuple(lemma: str, pos: str, lemma_lowercase: bool, **kwargs):
     else:
         return (lemma, pos)
 
+def sequence_to_str(sequence: List[int], delim: str = "-"):
+    return delim.join(map(str, sequence))
+
 def pad_trailing_tensors(embeddings: torch.Tensor, n_length_after_padding: int):
     """
     pad fixed-valued tensor at the training (=bottom in 2D) of a given tensor to obtain desired vector sequence length.
