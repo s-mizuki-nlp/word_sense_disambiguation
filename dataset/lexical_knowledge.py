@@ -4,6 +4,7 @@ import warnings
 from typing import Optional, Iterable, Tuple, Set, Type, List, Dict, Callable, Union, Any
 from collections import defaultdict, Counter
 
+import progressbar
 from torch.utils.data import Dataset
 import nltk
 from nltk.corpus import wordnet as wn
@@ -199,11 +200,11 @@ class SynsetDataset(NDJSONDataset, Dataset):
         return [string.lower() for string in lst_strings]
 
     @staticmethod
-    def synset_code_to_lookup_key(synset_code: List[int]):
-        if len(synset_code) == 0:
-            raise ValueError(f"`synset_code` cannot be empty.")
+    def sequence_to_str(sequence: List[int]):
+        if len(sequence) == 0:
+            raise ValueError(f"`sequence` cannot be empty.")
         else:
-            return sequence_to_str(synset_code)
+            return sequence_to_str(sequence)
 
     def _trim_trailing_zeroes(self, sense_code: List[int]) -> List[int]:
         n_length = len(sense_code) - sense_code.count(0)
@@ -223,7 +224,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
         for record in self:
 
             key_id = record["id"]
-            key_code = self.synset_code_to_lookup_key(record["code"])
+            key_code = self.sequence_to_str(record["code"])
             result[key_id] = record
             result[key_code] = record
 
@@ -239,7 +240,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
             pos = record["pos"]
             sense_code = record["code"]
             prefixes = self.synset_code_to_prefixes(sense_code, pos=pos)
-            str_prefixes = [self.synset_code_to_lookup_key(prefix) for prefix in prefixes]
+            str_prefixes = [self.sequence_to_str(prefix) for prefix in prefixes]
             num_descendents.update(str_prefixes)
             set_pos.add(pos)
         # decrement oneself except of virtual root (lookup_key={"n","v"})
@@ -264,7 +265,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
                 next_values += [0]
             for prefix, next_value in zip(prefixes, next_values):
                 # [65,1,2] -> "65-1-2"
-                lookup_key = self.synset_code_to_lookup_key(prefix)
+                lookup_key = self.sequence_to_str(prefix)
                 if lookup_key not in result:
                     result_k = {
                         "idx": index,
@@ -298,7 +299,9 @@ class SynsetDataset(NDJSONDataset, Dataset):
                 result[lookup_key][possible_value] = 0
 
         # count frequency
-        for record in dataset.record_loader():
+        q = progressbar.ProgressBar(max_value=progressbar.UnknownLength)
+        q.update(0)
+        for idx, record in enumerate(dataset.record_loader()):
             sense_code = record["ground_truth_synset_code"]
             pos = record["pos"]
             prefixes = self.synset_code_to_prefixes(sense_code, pos=pos)
@@ -309,10 +312,18 @@ class SynsetDataset(NDJSONDataset, Dataset):
                 next_values += [0]
             for prefix, next_value in zip(prefixes, next_values):
                 # ([65,1,2],5) -> ["65-1-2"][5] += 1
-                lookup_key = self.synset_code_to_lookup_key(prefix)
+                lookup_key = self.sequence_to_str(prefix)
                 result[lookup_key][next_value] += 1
+            if idx % 10000 == 0:
+                q.update(idx)
 
         return result
+
+    def synset_code_to_prefix(self, partial_sense_code: List[int], pos: Optional[str] = None) -> List[int]:
+        n_length = len(partial_sense_code) - partial_sense_code.count(0)
+        if pos is not None:
+            prefix = [self.pos_index[pos]] + partial_sense_code[:n_length]
+        return prefix
 
     def synset_code_to_prefixes(self, sense_code: List[int], pos: Optional[str] = None) -> List[List[int]]:
         n_length = len(sense_code) - sense_code.count(0)
@@ -321,7 +332,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
         return lst_prefixes
 
     def _get_synset_code_prefix_info(self, sense_code_prefix: List[int]):
-        key = self.synset_code_to_lookup_key(sense_code_prefix)
+        key = self.sequence_to_str(sense_code_prefix)
         return self._sense_code_taxonomy[key]
 
     def get_synset_code_prefix_info(self, partial_sense_code_or_prefix_index: Union[int, List[int]], pos: Optional[str] = None):
@@ -335,8 +346,8 @@ class SynsetDataset(NDJSONDataset, Dataset):
             lookup_key = self._sense_code_taxonomy_by_index[partial_sense_code_or_prefix_index]
             return self._sense_code_taxonomy[lookup_key]
         else:
-            prefixes = self.synset_code_to_prefixes(sense_code=partial_sense_code_or_prefix_index, pos=pos)
-            return self._get_synset_code_prefix_info(sense_code_prefix=prefixes[-1])
+            prefix = self.synset_code_to_prefix(partial_sense_code=partial_sense_code_or_prefix_index, pos=pos)
+            return self._get_synset_code_prefix_info(sense_code_prefix=prefix)
 
     def synset_code_to_prefix_ids(self, synset_code: List[int], pos: str, pad: bool = False, trim: bool = False) -> List[int]:
         """
@@ -366,7 +377,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
         if isinstance(synset_id_or_synset_code, str):
             return self._synsets[synset_id_or_synset_code]
         elif isinstance(synset_id_or_synset_code, list):
-            key = self.synset_code_to_lookup_key(synset_id_or_synset_code)
+            key = self.sequence_to_str(synset_id_or_synset_code)
             return self._synsets[key]
         else:
             raise ValueError(f"unknown key type: {type(synset_id_or_synset_code)}")
