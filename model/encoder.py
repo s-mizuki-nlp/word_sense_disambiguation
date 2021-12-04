@@ -383,7 +383,7 @@ class TransformerEncoder(BaseEncoder):
                                                      num_hashes=self._kwargs.get("num_hashes", 2),
                                                      embedding_dim=self._n_dim_hidden,
                                                      append_weight=True,
-                                                     replace_trailing_zeroes=False
+                                                     replace_trailing_zeroes=False # False = fill with zeroes
                                                      )
         else:
             raise AssertionError(f"unknown `embedding_layer_type` value: {self._embedding_layer_type}")
@@ -446,7 +446,7 @@ class TransformerEncoder(BaseEncoder):
                                                             embedding_dim=self._n_dim_hidden,
                                                             n_digits=self._n_digits, n_ary_out=self._n_ary,
                                                             append_weight=False,
-                                                            replace_trailing_zeroes=False
+                                                            replace_trailing_zeroes=False # False = fill with zeroes
                                                             )
         else:
             raise AssertionError(f"unknown `logit_layer_type` value: {self._logit_layer_type}")
@@ -481,8 +481,7 @@ class TransformerEncoder(BaseEncoder):
         return t_inputs
 
     def setup_sense_code_prefix_index(self, synset_dataset: SynsetDataset):
-        sense_code_taxonomy = synset_dataset.sense_code_taxonomy()
-        sense_code_prefix_index = {prefix:record["idx"] for prefix, record in sense_code_taxonomy.items()}
+        sense_code_prefix_index = synset_dataset.sense_code_prefix_index
 
         if hasattr(self._softmax_logit_layer, "sense_code_prefix_index"):
             self._softmax_logit_layer.sense_code_prefix_index = sense_code_prefix_index

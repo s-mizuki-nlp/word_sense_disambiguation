@@ -5,19 +5,18 @@ from __future__ import division, absolute_import, print_function, unicode_litera
 import torch
 from torch import nn
 
-from model.encoder_internal import BaseHashCode
+from model.encoder_internal import BasePrefixAwareLayer
 from model.hashembed import HashEmbedding
 
 
-class HashCodeAwareEmbedding(BaseHashCode):
+class HashCodeAwareEmbedding(BasePrefixAwareLayer):
 
     def __init__(self, n_seq_len: int, num_embeddings: int, embedding_dim: int, num_buckets: int,
-                 num_hashes: int = 2, n_prefix_hash_bins: int = int(1E14), pad_trailing_zeroes: bool = True,
+                 num_hashes: int = 2, replace_trailing_zeroes: bool = False,
                  append_weight: bool = True,
                  **kwargs):
 
-        super().__init__(n_prefix_hash_bins=n_prefix_hash_bins, max_seq_len=n_seq_len,
-                         pad_trailing_zeroes=pad_trailing_zeroes, random_seed=42, mask_zero=True)
+        super().__init__(replace_trailing_zeroes=replace_trailing_zeroes, null_prefix_index=0)
 
         self.emb_layer = HashEmbedding(num_embeddings=num_embeddings, num_hashes=num_hashes,
                                        embedding_dim=embedding_dim - num_hashes if append_weight else embedding_dim,
@@ -33,9 +32,9 @@ class HashCodeAwareEmbedding(BaseHashCode):
         assert input_sequence.ndim == 2, f"unexpected dimension size: {input_sequence.ndim}"
 
         # input_sequence_prefix_hashes: (n_batch, n_digits_so_far)
-        input_sequence_prefix_hashes = self.transform_sequence_to_prefix_hashes(input_sequence)
+        input_sequence_prefix_indices = self.transform_sequence_to_prefix_indices(input_sequence)
         # t_emb: (n_batch, n_digits_so_far, n_emb)
-        t_emb = self.emb_layer.forward(input_sequence_prefix_hashes)
+        t_emb = self.emb_layer.forward(input_sequence_prefix_indices)
 
         return t_emb
 
