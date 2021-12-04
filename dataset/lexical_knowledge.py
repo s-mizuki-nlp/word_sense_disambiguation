@@ -290,10 +290,11 @@ class SynsetDataset(NDJSONDataset, Dataset):
         # result["1-2"] = {"idx":138, "next_values": {4,1,135,...,}, "num_descendents": 16788}
         return result
 
-    def count_synset_code_prefix_next_values(self, dataset: "WSDTaskDataset") -> Dict[str, Dict[int, int]]:
+    def count_synset_code_prefix_next_values(self, dataset: "WSDTaskDataset", use_index_as_lookup_key: bool = False) -> Dict[str, Dict[int, int]]:
         result = {}
         # initialize by sense code taxonomy.
-        for lookup_key, record in self._sense_code_taxonomy.items():
+        for str_prefix, record in self._sense_code_taxonomy.items():
+            lookup_key = record["idx"] if use_idex_as_lookup_key else str_prefix
             result[lookup_key] = {}
             for possible_value in record["next_values"]:
                 result[lookup_key][possible_value] = 0
@@ -312,7 +313,11 @@ class SynsetDataset(NDJSONDataset, Dataset):
                 next_values += [0]
             for prefix, next_value in zip(prefixes, next_values):
                 # ([65,1,2],5) -> ["65-1-2"][5] += 1
-                lookup_key = self.sequence_to_str(prefix)
+                str_prefix = self.sequence_to_str(prefix)
+                if use_index_as_lookup_key:
+                    lookup_key = self._sense_code_taxonomy[str_prefix]["idx"]
+                else:
+                    lookup_key = str_prefix
                 result[lookup_key][next_value] += 1
             if idx % 10000 == 0:
                 q.update(idx)
