@@ -60,7 +60,7 @@ class BaseEncoder(nn.Module):
 class LSTMEncoder(BaseEncoder):
 
     def __init__(self, n_dim_emb: int, n_digits: int, n_ary: int,
-                 pos_tagset: Iterable[str],
+                 pos_index: Dict[str, int],
                  n_dim_hidden: Optional[int] = None,
                  n_dim_emb_code: Optional[int] = None,
                  teacher_forcing: bool = True,
@@ -87,7 +87,7 @@ class LSTMEncoder(BaseEncoder):
         self._n_dim_hidden = n_dim_emb if n_dim_hidden is None else n_dim_hidden
         self._n_digits = n_digits
         # self._n_ary = n_ary
-        self._pos_tagset = sorted(list(pos_tagset))
+        self._pos_index = pos_index
         self._n_ary_internal = None
         self._global_attention_type = global_attention_type
         self._teacher_forcing = teacher_forcing
@@ -102,11 +102,6 @@ class LSTMEncoder(BaseEncoder):
         self._build()
 
     def _build(self):
-
-        # assign part-of-speech index
-        self._pos_index = {}
-        for idx, pos in enumerate(self._pos_tagset):
-            self._pos_index[pos] = idx
 
         # ([x;e_t],h_t) or (e_t,h_t) -> h_t
         if self._input_entity_vector:
@@ -375,7 +370,7 @@ class TransformerEncoder(BaseEncoder):
             "embedding_dim":self._n_dim_hidden,
             "max_norm":1.0 if self._norm_digit_embeddings else None,
             "padding_idx":0 if self._ignore_trailing_zero_digits else None,
-            "num_embeddings": self._n_ary + len(self._pos_tagset) # n_pos will be used for beginning-of-sense-code symbol.
+            "num_embeddings": self._n_ary + len(self._pos_index) # n_pos will be used for beginning-of-sense-code symbol.
         }
         if self._embedding_layer_type == "default":
             self._emb_layer = PositionAwareEmbedding(n_seq_len=None, **cfg_emb_layer)
@@ -387,7 +382,8 @@ class TransformerEncoder(BaseEncoder):
                                                      num_embeddings=self._n_synset_code_prefix+1,
                                                      num_hashes=self._kwargs.get("num_hashes", 2),
                                                      embedding_dim=self._n_dim_hidden,
-                                                     append_weight=True
+                                                     append_weight=True,
+                                                     replace_trailing_zeroes=False
                                                      )
         else:
             raise AssertionError(f"unknown `embedding_layer_type` value: {self._embedding_layer_type}")
@@ -436,7 +432,7 @@ class TransformerEncoder(BaseEncoder):
             self._softmax_logit_layer = PositionAwareLogits(n_seq_len=self._n_digits, in_features=self._n_dim_hidden, out_features=self._n_ary)
         elif self._logit_layer_type == "additive":
             self._softmax_logit_layer = AdditiveCodeAwareLogits(n_digits=self._n_digits,
-                                                                n_ary_in=self._n_ary + len(self._pos_tagset),
+                                                                n_ary_in=self._n_ary + len(self._pos_index),
                                                                 n_ary_out=self._n_ary,
                                                                 n_dim_emb=self._n_dim_hidden,
                                                                 bias=self._kwargs.get("bias", True),
@@ -449,7 +445,9 @@ class TransformerEncoder(BaseEncoder):
                                                             num_hashes=self._kwargs.get("num_hashes", 2),
                                                             embedding_dim=self._n_dim_hidden,
                                                             n_digits=self._n_digits, n_ary_out=self._n_ary,
-                                                            append_weight=False)
+                                                            append_weight=False,
+                                                            replace_trailing_zeroes=False
+                                                            )
         else:
             raise AssertionError(f"unknown `logit_layer_type` value: {self._logit_layer_type}")
 
@@ -494,7 +492,7 @@ class TransformerEncoder(BaseEncoder):
             print(f"sense code prefix index is set: {self._emb_layer.__class__.__name__}")
 
     def setup_sense_code_prefix_statistics(self, trainset: WSDTaskDataset, synset_dataset: Optional[SynsetDataset] = None):
-        if not hasattr(self._softmax_logit_layer, "sense_code_prefix_stats"):
+        if not hasattr(self._softmax_logit_layer, "sense_code_prefix_statistics"):
             print(f"logit layer doesn't support prefix statistics. do nothing.")
             return
         else:
@@ -750,7 +748,7 @@ class TransformerEncoder(BaseEncoder):
             "num_decoder_layers": self._num_decoder_layers,
             "num_encoder_layers": self._num_encoder_layers,
             "memory_encoder_input_feature": self._memory_encoder_input_feature,
-            "pos_tagset": self._pos_tagset,
+            "pos_index": self._pos_index,
             "layer_normalization": self._layer_normalization,
             "logit_layer_type": self._logit_layer_type,
             "embedding_layer_type": self._embedding_layer_type,

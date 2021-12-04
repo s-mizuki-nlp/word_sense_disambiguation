@@ -290,7 +290,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
         # result["1-2"] = {"idx":138, "next_values": {4,1,135,...,}, "num_descendents": 16788}
         return result
 
-    def count_synset_code_prefix_frequency(self, dataset: "WSDTaskDataset") -> Dict[str, Dict[int, int]]:
+    def count_synset_code_prefix_next_values(self, dataset: "WSDTaskDataset") -> Dict[str, Dict[int, int]]:
         result = {}
         # initialize by sense code taxonomy.
         for lookup_key, record in self._sense_code_taxonomy.items():
