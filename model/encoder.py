@@ -11,6 +11,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
 
+from dataset import WSDTaskDataset
 from dataset.lexical_knowledge import SynsetDataset
 
 from .onmt.global_attention import GlobalAttention
@@ -460,7 +461,8 @@ class TransformerEncoder(BaseEncoder):
         self._softmax_logit_layer.init_weights()
 
     def create_sequence_inputs(self, lst_pos: List[str], device,
-                               ground_truth_synset_codes: Optional[Union[List[List[int]], torch.Tensor]] = None) -> torch.Tensor:
+                               ground_truth_synset_codes: Optional[Union[List[List[int]], torch.Tensor]] = None,
+                               trim: bool = True) -> torch.Tensor:
         # 1. prepend PoS index
         # t_boc: (n_batch, 1)
         lst_pos_idx = [self._pos_index[pos] for pos in lst_pos]
@@ -473,10 +475,33 @@ class TransformerEncoder(BaseEncoder):
         # ground_truth_synset_codes: (n_batch, <=n_digits)
         if isinstance(ground_truth_synset_codes, list):
             ground_truth_synset_codes = torch.LongTensor(ground_truth_synset_codes, device="cpu").to(device)
-        # input sequence length must be less or equal to n_digits.
         # t_inputs: (n_batch, <n_digits)
-        t_inputs = torch.cat((t_boc, ground_truth_synset_codes[:,:self._n_digits-1]), dim=-1)
+        t_inputs = torch.cat((t_boc, ground_truth_synset_codes), dim=-1)
+        if trim:
+            # trim the input sequence so that it would not exceed the number of digits.
+            t_inputs = t_inputs[:,:self._n_digits]
         return t_inputs
+
+    def setup_sense_code_prefix_index(self, synset_dataset: SynsetDataset):
+        sense_code_taxonomy = synset_dataset.sense_code_taxonomy()
+        sense_code_prefix_index = {prefix:record["idx"] for prefix, record in sense_code_taxonomy.items()}
+
+        if hasattr(self._softmax_logit_layer, "sense_code_prefix_index"):
+            self._softmax_logit_layer.sense_code_prefix_index = sense_code_prefix_index
+            print(f"sense code prefix index is set: {self._softmax_logit_layer.__class__.__name__}")
+        if hasattr(self._emb_layer, "sense_code_prefix_index"):
+            self._emb_layer.sense_code_prefix_index = sense_code_prefix_index
+            print(f"sense code prefix index is set: {self._emb_layer.__class__.__name__}")
+
+    def setup_sense_code_prefix_statistics(self, trainset: WSDTaskDataset, synset_dataset: Optional[SynsetDataset] = None):
+        if not hasattr(self._softmax_logit_layer, "sense_code_prefix_stats"):
+            print(f"logit layer doesn't support prefix statistics. do nothing.")
+            return
+        else:
+            synset_dataset = trainset.synset_dataset if synset_dataset is None else synset_dataset
+            prefix_stats = synset_dataset.count_synset_code_prefix_next_values(trainset)
+            self._softmax_logit_layer.sense_code_prefix_stats = prefix_stats
+            print(f"sense code prefix stats has been set: {self._softmax_logit_layer.__class__.__name__}")
 
     @staticmethod
     def generate_square_subsequent_mask(sz: int) -> torch.Tensor:
