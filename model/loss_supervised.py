@@ -513,9 +513,9 @@ class FocalCrossEntropyLoss(nn.CrossEntropyLoss):
         self.reduction = reduction
         self.gamma = gamma
 
-    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.Tensor) -> torch.Tensor:
+    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.Tensor, eps=1E-15) -> torch.Tensor:
         # input_code_probabilities: (n_batch, n_digits, n_ary)
-        input_score = torch.log(input_code_probabilities).swapaxes(1,2)
+        input_score = torch.log(input_code_probabilities+eps).swapaxes(1,2)
 
         # it returns sample and class wise log cross entropy.
         # cross_entropy: (n_batch, n_digits); cross_entropy[b][d] = -log(input_code_probabilities[b][d][target_codes[b][d]])
