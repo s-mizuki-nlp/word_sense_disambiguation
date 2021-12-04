@@ -477,5 +477,6 @@ class SynsetDataset(NDJSONDataset, Dataset):
         return v
 
     @property
-    def sense_code_taxonomy(self):
-        return self._sense_code_taxonomy
+    def sense_code_prefix_index(self):
+        prefix_index = {prefix:record["idx"] for prefix, record in self._sense_code_taxonomy.items()}
+        return prefix_index
