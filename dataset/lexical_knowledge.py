@@ -187,7 +187,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
 
         self._synsets = self._setup_lexical_knowledge()
         self._sense_code_taxonomy = self._setup_sense_code_taxonomy()
-        self._sense_code_taxonomy_by_index = {record["idx"]:record for record in self._sense_code_taxonomy.values()}
+        self._sense_code_taxonomy_by_index = {record["idx"]:key for key, record in self._sense_code_taxonomy.items()}
 
     def _setup_wordnet(self):
         try:
@@ -250,7 +250,6 @@ class SynsetDataset(NDJSONDataset, Dataset):
             num_descendents[key] = value - 1
 
         # 2. record sense code prefix info
-        n_digits = self.n_digits
         index = 1
         for record in self:
             pos = record["pos"]
@@ -260,8 +259,8 @@ class SynsetDataset(NDJSONDataset, Dataset):
             # [1,2,0,0] -> [1,2,0]
             next_values = sense_code[:len(prefixes)]
             # append zero for full-length sense code (can be detected by len()==n_digits)
-            if len(prefixes) > n_digits:
-                assert len(prefixes) == n_digits+1, f"unexpected sense code: {sense_code}"
+            if len(prefixes) > self.n_digits:
+                assert len(prefixes) == self.n_digits+1, f"unexpected sense code: {sense_code}"
                 next_values += [0]
             for prefix, next_value in zip(prefixes, next_values):
                 # [65,1,2] -> "65-1-2"
@@ -290,6 +289,31 @@ class SynsetDataset(NDJSONDataset, Dataset):
         # result["1-2"] = {"idx":138, "next_values": {4,1,135,...,}, "num_descendents": 16788}
         return result
 
+    def count_synset_code_prefix_frequency(self, dataset: "WSDTaskDataset") -> Dict[str, Dict[int, int]]:
+        result = {}
+        # initialize by sense code taxonomy.
+        for lookup_key, record in self._sense_code_taxonomy.items():
+            result[lookup_key] = {}
+            for possible_value in record["next_values"]:
+                result[lookup_key][possible_value] = 0
+
+        # count frequency
+        for record in dataset.record_loader():
+            sense_code = record["ground_truth_synset_code"]
+            pos = record["pos"]
+            prefixes = self.synset_code_to_prefixes(sense_code, pos=pos)
+            next_values = sense_code[:len(prefixes)]
+            # append zero for full-length sense code (can be detected by len()==n_digits)
+            if len(prefixes) > self.n_digits:
+                assert len(prefixes) == self.n_digits+1, f"unexpected sense code: {sense_code}"
+                next_values += [0]
+            for prefix, next_value in zip(prefixes, next_values):
+                # ([65,1,2],5) -> ["65-1-2"][5] += 1
+                lookup_key = self.synset_code_to_lookup_key(prefix)
+                result[lookup_key][next_value] += 1
+
+        return result
+
     def synset_code_to_prefixes(self, sense_code: List[int], pos: Optional[str] = None) -> List[List[int]]:
         n_length = len(sense_code) - sense_code.count(0)
         if pos is not None:
@@ -308,7 +332,8 @@ class SynsetDataset(NDJSONDataset, Dataset):
         @rtype: object
         """
         if isinstance(partial_sense_code_or_prefix_index, int):
-            return self._sense_code_taxonomy_by_index[partial_sense_code_or_prefix_index]
+            lookup_key = self._sense_code_taxonomy_by_index[partial_sense_code_or_prefix_index]
+            return self._sense_code_taxonomy[lookup_key]
         else:
             prefixes = self.synset_code_to_prefixes(sense_code=partial_sense_code_or_prefix_index, pos=pos)
             return self._get_synset_code_prefix_info(sense_code_prefix=prefixes[-1])
@@ -425,7 +450,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
         """
         if not hasattr(self, "_pos_index"):
             pos_index = {}
-            for idx, pos in enumerate(self.pos_tagset):
+            for idx, pos in enumerate(sorted(list(self.pos_tagset))):
                 pos_index[pos] = self.n_ary + idx
             self._pos_index = pos_index
             self._pos_index_rev = {idx:pos for pos,idx in pos_index.items()}
@@ -439,3 +464,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
         v["n_synset"] = self.n_synset
         v["n_synset_code_prefix"] = self.n_synset_code_prefix
         return v
+
+    @property
+    def sense_code_taxonomy(self):
+        return self._sense_code_taxonomy
