@@ -37,7 +37,7 @@ class SenseCodeTrainer(LightningModule):
         super().__init__()
 
         self._loss_supervised = loss_supervised
-        self._scale_loss_supervised = loss_supervised.scale
+        self._scale_loss_supervised = getattr(loss_supervised, "scale", 1.0)
 
         self._model = model
         self._encoder = model._encoder
