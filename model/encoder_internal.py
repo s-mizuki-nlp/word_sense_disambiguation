@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 from __future__ import division
 from __future__ import print_function
 
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Iterable, Union
 
 import torch
 from torch import nn
@@ -15,15 +15,37 @@ from dataset.utils import sequence_to_str
 from .hashembed.embedding import HashFamily
 from collections import Counter, defaultdict
 
+def min_excluding_zeroes(values: Iterable[int], default_value=0):
+    def is_natural_number(v: int):
+        return v > 0
+
+    return min(filter(is_natural_number, values), default=default_value)
+
+
 class BasePrefixAwareLayer(torch.nn.Module):
 
-    def __init__(self, replace_trailing_zeroes: bool, null_prefix_index: Optional[int] = None):
+    def __init__(self, replace_trailing_zeroes: bool,
+                 num_classes: Optional[int] = None, null_prefix_index: Optional[int] = None,
+                 unobserved_class_fill_strategy: Union[str, int] = "min",
+                 smoothing_alpha: float = 0.1):
+        """
+
+        @param replace_trailing_zeroes: fill trailing prefix index using last non-zero index.
+        @param num_classes: number of classes used for prior probability setup.
+        @param null_prefix_index: prefix index used for undefined prefix.
+        @param smoothing_alpha: smoothing parameter used for calculating prior probability: \pi(c) = count(c) + \alpha / \sum_{c'}{count(c')+\alpha}
+        @param unobserved_class_fill_strategy:
+        @param num_classes: number of classes. i.e., n_ary
+        @param smoothing_alpha: smoothing parameter for zero-freq entry.
+        """
         super().__init__()
-        # self._num_classes = num_classes
+        self._num_classes = num_classes
         self._null_prefix_index = null_prefix_index
+        self._unobserved_class_fill_strategy = unobserved_class_fill_strategy
         self._replace_trailing_zeroes = replace_trailing_zeroes
         self._sense_code_prefix_index = None
         self._sense_code_prefix_statistics = None
+        self._smoothing_alpha = smoothing_alpha
 
     def transform_sequence_to_prefix_indices(self, sequences: torch.Tensor) -> torch.Tensor:
         """
@@ -58,17 +80,51 @@ class BasePrefixAwareLayer(torch.nn.Module):
 
         return t_prefix_indices
 
-    # def lookup_prior_probabilities(self, input_sequences: torch.Tensor, num_classes: int, smoothing_alpha: int = 10) -> torch.Tensor:
-    #     """
-    #     returns class-prior probability of each position in the sequence based on prefix statistics.
-    #
-    #     @param input_sequences: (n_batch, n_digits)
-    #     @param num_classes: number of classes. i.e., n_ary
-    #     @param smoothing_alpha: smoothing parameter for zero-freq entry.
-    #     """
-    #     sequence_prefix_hashes = self.transform_sequence_to_prefix_indices(input_sequences)
-    #     for sequence_prefix_hash in sequence_prefix_hashes.tolist():
-    #         pass
+    def get_prior_probabilities(self, sequences: torch.Tensor) -> torch.Tensor:
+        """
+        returns class-prior probability of each position in the sequence based on prefix statistics.
+
+        @param sequences: (n_batch, n_digits)
+        @return: (n_batch, n_digits, num_classes)
+        """
+        device = sequences.device
+        lst_lst_counts = [] # List[List[List[float]]]
+        sequence_prefix_indices = self.transform_sequence_to_prefix_indices(sequences)
+        for prefix_indices in sequence_prefix_indices.tolist():
+            lst_counts = [self.get_sense_code_prefix_counts(index) for index in prefix_indices]
+            lst_lst_counts.append(lst_counts)
+
+        t_prior = torch.Tensor(lst_lst_counts, device=device)
+        # normalize for each class
+        t_prior = t_prior / t_prior.sum(dim=-1, keepdim=True)
+
+        return t_prior
+
+    def get_sense_code_prefix_counts(self, prefix_index: int) -> List[float]:
+        # smoothing_alpha is used for prior of prior.
+        lst_counts = [self._smoothing_alpha] * self._num_classes
+
+        lookup_key = prefix_index
+        if lookup_key not in self._sense_code_prefix_statistics:
+            return lst_counts
+
+        dict_stats = self._sense_code_prefix_statistics[lookup_key]
+        if len(dict_stats) == 0:
+            return lst_counts
+
+        if isinstance(self._unobserved_class_fill_strategy, int):
+            fill_value = self._unobserved_class_fill_strategy
+        elif self._unobserved_class_fill_strategy == "min":
+            fill_value = min_excluding_zeroes(dict_stats.values(), default_value=0)
+        else:
+            raise AttributeError(f"unknown `unobserved_class_fill_strategy` value: {self._unobserved_class_fill_strategy}")
+
+        for idx, count in dict_stats.items():
+            # fill unobserved
+            count = count if count > 0 else fill_value
+            lst_counts[idx] += count
+
+        return lst_counts
 
     @property
     def sense_code_prefix_index(self) -> Dict[str, int]:
@@ -80,11 +136,11 @@ class BasePrefixAwareLayer(torch.nn.Module):
         self._sense_code_prefix_index = new_value
 
     @property
-    def sense_code_prefix_statistics(self) -> Dict[str, Dict[int, int]]:
+    def sense_code_prefix_statistics(self) -> Dict[int, Dict[int, int]]:
         return self._sense_code_prefix_statistics
 
     @sense_code_prefix_statistics.setter
-    def sense_code_prefix_statistics(self, new_value):
+    def sense_code_prefix_statistics(self, new_value: Dict[int, Dict[int, int]]):
         assert self._sense_code_prefix_statistics is None, f"prefix statistics is already set. this attribute is single write only."
         self._sense_code_prefix_statistics = new_value
 

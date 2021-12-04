@@ -2,7 +2,7 @@
 # -*- coding:utf-8 -*-
 from __future__ import division, absolute_import, print_function, unicode_literals
 
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from torch import nn
@@ -17,9 +17,14 @@ class HashCodeAwareLogits(BasePrefixAwareLayer):
                  num_embeddings: int, embedding_dim: int, num_buckets: int, num_hashes=2,
                  replace_trailing_zeroes: bool = False,
                  append_weight: bool = False,
+                 unobserved_class_fill_strategy: Union[str, int] = "min",
+                 smoothing_alpha: float = 0.1,
                  **kwargs):
 
-        super().__init__(replace_trailing_zeroes=replace_trailing_zeroes, null_prefix_index=0)
+        super().__init__(replace_trailing_zeroes=replace_trailing_zeroes,
+                         num_classes=n_ary_out, smoothing_alpha=smoothing_alpha,
+                         unobserved_class_fill_strategy=unobserved_class_fill_strategy,
+                         null_prefix_index=0)
         self._n_digits = n_digits
         self._n_ary = n_ary_out
         self._n_dim_emb = embedding_dim

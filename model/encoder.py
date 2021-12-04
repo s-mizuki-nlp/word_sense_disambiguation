@@ -490,13 +490,14 @@ class TransformerEncoder(BaseEncoder):
             self._emb_layer.sense_code_prefix_index = sense_code_prefix_index
             print(f"sense code prefix index is set: {self._emb_layer.__class__.__name__}")
 
-    def setup_sense_code_prefix_statistics(self, trainset: WSDTaskDataset, synset_dataset: Optional[SynsetDataset] = None):
+    def setup_sense_code_prefix_statistics(self, trainset: WSDTaskDataset, synset_dataset: Optional[SynsetDataset] = None,
+                                           use_prefix_index_as_lookup_key: bool = True):
         if not hasattr(self._softmax_logit_layer, "sense_code_prefix_statistics"):
             print(f"logit layer doesn't support prefix statistics. do nothing.")
             return
         else:
             synset_dataset = trainset.synset_dataset if synset_dataset is None else synset_dataset
-            prefix_stats = synset_dataset.count_synset_code_prefix_next_values(trainset)
+            prefix_stats = synset_dataset.count_synset_code_prefix_next_values(trainset, use_index_as_lookup_key=use_prefix_index_as_lookup_key)
             self._softmax_logit_layer.sense_code_prefix_stats = prefix_stats
             print(f"sense code prefix stats has been set: {self._softmax_logit_layer.__class__.__name__}")
 
