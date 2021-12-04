@@ -24,19 +24,12 @@ def min_excluding_zeroes(values: Iterable[int], default_value=0):
 
 class BasePrefixAwareLayer(torch.nn.Module):
 
-    def __init__(self, replace_trailing_zeroes: bool,
-                 num_classes: Optional[int] = None, null_prefix_index: Optional[int] = None,
-                 unobserved_class_fill_strategy: Union[str, int] = "min",
-                 smoothing_alpha: float = 0.1):
+    def __init__(self, replace_trailing_zeroes: bool, null_prefix_index: Optional[int] = None):
+
         """
 
         @param replace_trailing_zeroes: fill trailing prefix index using last non-zero index.
-        @param num_classes: number of classes used for prior probability setup.
         @param null_prefix_index: prefix index used for undefined prefix.
-        @param smoothing_alpha: smoothing parameter used for calculating prior probability: \pi(c) = count(c) + \alpha / \sum_{c'}{count(c')+\alpha}
-        @param unobserved_class_fill_strategy:
-        @param num_classes: number of classes. i.e., n_ary
-        @param smoothing_alpha: smoothing parameter for zero-freq entry.
         """
         super().__init__()
         self._num_classes = num_classes
@@ -79,6 +72,47 @@ class BasePrefixAwareLayer(torch.nn.Module):
         t_prefix_indices = torch.LongTensor(lst_prefix_indices).to(device)
 
         return t_prefix_indices
+
+
+    @property
+    def sense_code_prefix_index(self) -> Dict[str, int]:
+        return self._sense_code_prefix_index
+
+    @sense_code_prefix_index.setter
+    def sense_code_prefix_index(self, new_value):
+        assert self._sense_code_prefix_index is None, f"prefix index is already set. this attribute is single write only."
+        self._sense_code_prefix_index = new_value
+
+
+class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
+
+    def __init__(self, replace_trailing_zeroes: bool,
+                 null_prefix_index: Optional[int] = None,
+                 num_classes: Optional[int] = None,
+                 unobserved_class_fill_strategy: Union[str, int] = "min",
+                 smoothing_alpha: float = 0.1):
+        """
+
+        @param replace_trailing_zeroes: fill trailing prefix index using last non-zero index.
+        @param null_prefix_index: prefix index used for undefined prefix.
+        @param num_classes: number of classes used for prior probability setup. i.e., n_ary
+        @param smoothing_alpha: smoothing parameter used for calculating prior probability: \pi(c) = count(c) + \alpha / \sum_{c'}{count(c')+\alpha}
+        @param unobserved_class_fill_strategy: how to replace unobserved but possible class count.
+        """
+        super().__init__(replace_trailing_zeroes=replace_trailing_zeroes, null_prefix_index=null_prefix_index, )
+        self._num_classes = num_classes
+        self._unobserved_class_fill_strategy = unobserved_class_fill_strategy
+        self._smoothing_alpha = smoothing_alpha
+        self._sense_code_prefix_statistics = None
+
+    @property
+    def sense_code_prefix_statistics(self) -> Dict[int, Dict[int, int]]:
+        return self._sense_code_prefix_statistics
+
+    @sense_code_prefix_statistics.setter
+    def sense_code_prefix_statistics(self, new_value: Dict[int, Dict[int, int]]):
+        assert self._sense_code_prefix_statistics is None, f"prefix statistics is already set. this attribute is single write only."
+        self._sense_code_prefix_statistics = new_value
 
     def get_prior_probabilities(self, sequences: torch.Tensor) -> torch.Tensor:
         """
@@ -125,24 +159,6 @@ class BasePrefixAwareLayer(torch.nn.Module):
             lst_counts[idx] += count
 
         return lst_counts
-
-    @property
-    def sense_code_prefix_index(self) -> Dict[str, int]:
-        return self._sense_code_prefix_index
-
-    @sense_code_prefix_index.setter
-    def sense_code_prefix_index(self, new_value):
-        assert self._sense_code_prefix_index is None, f"prefix index is already set. this attribute is single write only."
-        self._sense_code_prefix_index = new_value
-
-    @property
-    def sense_code_prefix_statistics(self) -> Dict[int, Dict[int, int]]:
-        return self._sense_code_prefix_statistics
-
-    @sense_code_prefix_statistics.setter
-    def sense_code_prefix_statistics(self, new_value: Dict[int, Dict[int, int]]):
-        assert self._sense_code_prefix_statistics is None, f"prefix statistics is already set. this attribute is single write only."
-        self._sense_code_prefix_statistics = new_value
 
 
 class PositionalEncoding(torch.nn.Module):

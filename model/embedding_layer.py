@@ -16,7 +16,7 @@ class HashCodeAwareEmbedding(BasePrefixAwareLayer):
                  append_weight: bool = True,
                  **kwargs):
 
-        super().__init__(replace_trailing_zeroes=replace_trailing_zeroes, null_prefix_index=0, num_classes=None)
+        super().__init__(replace_trailing_zeroes=replace_trailing_zeroes, null_prefix_index=0)
 
         self.emb_layer = HashEmbedding(num_embeddings=num_embeddings, num_hashes=num_hashes,
                                        embedding_dim=embedding_dim - num_hashes if append_weight else embedding_dim,
