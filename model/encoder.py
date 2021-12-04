@@ -11,6 +11,8 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
 
+from dataset.lexical_knowledge import SynsetDataset
+
 from .onmt.global_attention import GlobalAttention
 from .encoder_internal import \
     PositionalEncoding
@@ -318,7 +320,7 @@ class TransformerEncoder(BaseEncoder):
                  num_encoder_layers: int,
                  num_decoder_layers: int,
                  n_head: int,
-                 pos_tagset: Iterable[str],
+                 pos_index: Dict[str, int],
                  n_synset_code_prefix: Optional[int] = None,
                  memory_encoder_input_feature: str = "entity",
                  layer_normalization: bool = False,
@@ -347,7 +349,7 @@ class TransformerEncoder(BaseEncoder):
         self._n_digits = n_digits
         # self._n_ary = n_ary
         self._n_synset_code_prefix = n_synset_code_prefix
-        self._pos_tagset = sorted(list(pos_tagset))
+        self._pos_index = pos_index
         self._num_encoder_layers = num_encoder_layers
         self._memory_encoder_input_feature = memory_encoder_input_feature
         self._num_decoder_layers = num_decoder_layers
@@ -366,11 +368,6 @@ class TransformerEncoder(BaseEncoder):
         self._build()
 
     def _build(self):
-
-        # assign part-of-speech index
-        self._pos_index = {}
-        for idx, pos in enumerate(self._pos_tagset):
-            self._pos_index[pos] = self._n_ary + idx
 
         # digit embeddings
         cfg_emb_layer = {

@@ -243,7 +243,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
             num_descendents.update(str_prefixes)
             set_pos.add(pos)
         # decrement oneself except of virtual root (lookup_key={"n","v"})
-        root_keys = {str(self.pos_to_index_mapping[pos]) for pos in set_pos}
+        root_keys = {str(self.pos_index[pos]) for pos in set_pos}
         for key, value in num_descendents.items():
             if key in root_keys:
                 continue
@@ -293,7 +293,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
     def synset_code_to_prefixes(self, sense_code: List[int], pos: Optional[str] = None) -> List[List[int]]:
         n_length = len(sense_code) - sense_code.count(0)
         if pos is not None:
-            lst_prefixes = [[self.pos_to_index_mapping[pos]] + sense_code[:d] for d in range(n_length+1)]
+            lst_prefixes = [[self.pos_index[pos]] + sense_code[:d] for d in range(n_length + 1)]
         return lst_prefixes
 
     def _get_synset_code_prefix_info(self, sense_code_prefix: List[int]):
@@ -408,11 +408,21 @@ class SynsetDataset(NDJSONDataset, Dataset):
         return len(self._sense_code_taxonomy)
 
     @property
-    def pos_tagset(self):
+    def pos_tagset(self) -> List[str]:
+        """
+        set of part-of-speech tags in the dataset. e.g., ["n","v"]
+
+        @return: set of part-of-speech tags
+        """
         return self.distinct_values(column="pos")
 
     @property
-    def pos_to_index_mapping(self):
+    def pos_index(self) -> Dict[str, int]:
+        """
+        part-of-speech tag to index which starts at n_ary. e.g., {"n":64, "v":65}
+
+        @return:
+        """
         if not hasattr(self, "_pos_index"):
             pos_index = {}
             for idx, pos in enumerate(self.pos_tagset):
