@@ -113,12 +113,17 @@ class AdditiveCodeAwareLogits(torch.nn.Module):
         # input_sequence: (n_batch, n_digits_so_far) input_sequence[b,d] \in {0,n_ary_in}
         # t_representation: (n_batch, n_digits_so_far, n_dim)
 
+        device = input_sequence.device
         n_digits_so_far = min(self._n_digits, input_sequence.shape[-1])
         lst_base_weights = [self.base_weight_layers[digit](input_sequence[:,digit]) for digit in range(n_digits_so_far)]
         # t_base_weight: (n_batch, n_digits_so_far, n_ary_out * n_dim)
         t_base_weight = torch.stack(lst_base_weights, dim=1)
         if self._depends_on_previous_digits is None:
             t_weight_ = torch.cumsum(t_base_weight, dim=1)
+            # by dividing number of digits, it may avoid nan error.
+            # t_denom: (1, n_digits_so_far, 1)
+            t_denom = torch.arange(start=1, end=n_digits_so_far+1, device=device).view(1, -1, 1)
+            t_weight_ = t_weight_ / t_denom
         else:
             t_weight_ = self._ragged_cumsum(t_base_weight, dim=1, stride=min(self._depends_on_previous_digits, n_digits_so_far))
         if self._bias:
