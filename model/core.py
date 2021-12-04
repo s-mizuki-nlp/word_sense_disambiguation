@@ -245,8 +245,6 @@ class HierarchicalCodeEncoder(nn.Module):
         """
         assert kwargs.get("ground_truth_synset_codes",None) is not None, \
             f"`ground_truth_synset_codes` is missing."
-        assert kwargs.get("ground_truth_synset_code_prefixes",None) is not None, \
-            f"`ground_truth_synset_code_prefixes` is missing."
         t_code, t_code_prob = self.forward(**kwargs, requires_grad=False, on_inference=True)
         if t_code.ndim == 3:
             t_code = t_code.argmax(dim=-1)
