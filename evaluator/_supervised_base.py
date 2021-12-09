@@ -145,7 +145,7 @@ class WSDTaskEvaluatorBase(BaseEvaluatorByRaganato, metaclass=ABCMeta):
             self._evaluation_data_loader = WSDTaskDataLoader(evaluation_dataset, batch_size=1)
         elif isinstance(evaluation_dataset, EntityLevelWSDEvaluationDataset):
             self._evaluation_data_loader = DataLoader(evaluation_dataset, batch_size=1,
-                                                      collate_fn=lambda v: tensor_to_device(v, device=device),
+                                                      collate_fn=lambda v: v,
                                                       **kwargs_dataloader)
         else:
             raise ValueError(f"unknown dataset: {type(evaluation_dataset)}")
@@ -157,6 +157,7 @@ class WSDTaskEvaluatorBase(BaseEvaluatorByRaganato, metaclass=ABCMeta):
         else:
             self._breakdown_attributes = breakdown_attributes
         self.verbose = verbose
+        self._device = device
         self._predict_kwargs = {}
 
     def _tensor_to_list(self, tensor_or_list: Union[torch.Tensor, List]):
@@ -211,6 +212,7 @@ class WSDTaskEvaluatorBase(BaseEvaluatorByRaganato, metaclass=ABCMeta):
         is_wsd_task_dataset = isinstance(self._evaluation_dataset, WSDTaskDataset)
 
         for single_example_batch in self._evaluation_data_loader:
+            single_example_batch = tensor_to_device(single_example_batch, device=self._device)
             if is_wsd_task_dataset:
                 inputs_for_evaluator = single_example_batch["records"][0]
                 inputs_for_predictor = single_example_batch
