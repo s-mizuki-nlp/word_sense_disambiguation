@@ -29,16 +29,13 @@ class BasePrefixAwareLayer(torch.nn.Module):
         """
 
         @param replace_trailing_zeroes: fill trailing prefix index using last non-zero index.
-        @param null_prefix_index: prefix index used for undefined prefix.
+        @param null_prefix_index: prefix index used for unknown (=not found in sense_code_prefix_index) prefix.
         """
         super().__init__()
-        self._num_classes = num_classes
         self._null_prefix_index = null_prefix_index
-        self._unobserved_class_fill_strategy = unobserved_class_fill_strategy
         self._replace_trailing_zeroes = replace_trailing_zeroes
         self._sense_code_prefix_index = None
         self._sense_code_prefix_statistics = None
-        self._smoothing_alpha = smoothing_alpha
 
     def transform_sequence_to_prefix_indices(self, sequences: torch.Tensor) -> torch.Tensor:
         """
