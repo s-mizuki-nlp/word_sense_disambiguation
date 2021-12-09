@@ -84,8 +84,10 @@ class BasePrefixAwareLayer(torch.nn.Module):
 class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
 
     def __init__(self, replace_trailing_zeroes: bool,
-                 null_prefix_index: Optional[int] = None,
+                 logit_adjust_when: Union[str, bool],
                  num_classes: Optional[int] = None,
+                 logit_adjust_tau: float = 1.0,
+                 null_prefix_index: Optional[int] = None,
                  unobserved_class_fill_strategy: Union[str, int] = "min",
                  smoothing_alpha: float = 0.1):
         """
@@ -96,7 +98,17 @@ class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
         @param smoothing_alpha: smoothing parameter used for calculating prior probability: \pi(c) = count(c) + \alpha / \sum_{c'}{count(c')+\alpha}
         @param unobserved_class_fill_strategy: how to replace unobserved but possible class count.
         """
-        super().__init__(replace_trailing_zeroes=replace_trailing_zeroes, null_prefix_index=null_prefix_index, )
+
+        if isinstance(logit_adjust_when, bool) and (logit_adjust_when == False):
+            logit_adjust_when = "none"
+        else:
+            assert num_classes is not None, f"you must specify `num_classes`"
+        AVAILABLE_VALUES = ("none", "pre", "post", "train", "inference", "eval")
+        assert logit_adjust_when in AVAILABLE_VALUES, f"invalid `logit_adjust_when` value. it must be {AVAILABLE_VALUES}"
+
+        super().__init__(replace_trailing_zeroes=replace_trailing_zeroes, null_prefix_index=null_prefix_index)
+        self._logit_adjust_tau = logit_adjust_tau
+        self._logit_adjust_when = logit_adjust_when
         self._num_classes = num_classes
         self._unobserved_class_fill_strategy = unobserved_class_fill_strategy
         self._smoothing_alpha = smoothing_alpha
@@ -119,13 +131,15 @@ class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
         @return: (n_batch, n_digits, num_classes)
         """
         device = sequences.device
-        lst_lst_counts = [] # List[List[List[float]]]
+        lst_lst_lst_counts = [] # List[List[List[float]]]
+        # (n_batch, n_digits_so_far)
         sequence_prefix_indices = self.transform_sequence_to_prefix_indices(sequences)
         for prefix_indices in sequence_prefix_indices.tolist():
             lst_counts = [self.get_sense_code_prefix_counts(index) for index in prefix_indices]
-            lst_lst_counts.append(lst_counts)
+            lst_lst_lst_counts.append(lst_counts)
 
-        t_prior = torch.Tensor(lst_lst_counts, device=device)
+        # t_prior: (n_batch, n_digits_so_far, n_ary_out)
+        t_prior = torch.Tensor(lst_lst_lst_counts, device=device)
         # normalize for each class
         t_prior = t_prior / t_prior.sum(dim=-1, keepdim=True)
 
@@ -156,6 +170,22 @@ class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
             lst_counts[idx] += count
 
         return lst_counts
+
+    def apply_logit_adjustment(self, logits: torch.Tensor, sequences: torch.Tensor):
+        # logits: (n_batch, n_digits_so_far, n_ary)
+        if self._logit_adjust_when in ("pre","train"):
+            if self.training:
+                logits = logits + self._logit_adjust_tau * self.get_prior_probabilities(sequences)
+            else:
+                pass
+        elif self._logit_adjust_when in ("post","inference","eval"):
+            if self.training:
+                pass
+            else:
+                logits = logits - self._logit_adjust_tau * self.get_prior_probabilities(sequences)
+        elif self._logit_adjust_when == "none":
+            pass
+        return logits
 
 
 class PositionalEncoding(torch.nn.Module):

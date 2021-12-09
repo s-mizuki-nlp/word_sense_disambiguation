@@ -11,19 +11,33 @@ from model.encoder_internal import BasePrefixAwareLayer, BaseLogitAdjustableLaye
 from model.hashembed import HashEmbedding
 
 
-class HashCodeAwareLogits(BasePrefixAwareLayer):
+class HashCodeAwareLogits(BaseLogitAdjustableLayer):
 
     def __init__(self, n_digits: int, n_ary_out: int,
-                 num_embeddings: int, embedding_dim: int, num_buckets: int, num_hashes=2,
+                 num_embeddings: int, embedding_dim: int, num_buckets: int,
+                 logit_adjustment: bool,
+                 num_hashes=2,
                  replace_trailing_zeroes: bool = False,
                  append_weight: bool = False,
                  **kwargs):
 
-        super().__init__(replace_trailing_zeroes=replace_trailing_zeroes, null_prefix_index=0)
+        if logit_adjustment:
+            for required_argument in ("logit_adjust_tau", "logit_adjust_when"):
+                assert required_argument in kwargs, f"argument {required_argument} must be specified."
+            super().__init__(replace_trailing_zeroes=replace_trailing_zeroes, null_prefix_index=0,
+                             num_classes=n_ary_out, unobserved_class_fill_strategy=kwargs.get("unobserved_class_fill_strategy", "min"),
+                             smoothing_alpha=kwargs.get("smoothing_alpha", 0.1),
+                             logit_adjust_when=kwargs["logit_adjust_when"],
+                             logit_adjust_tau=kwargs["logit_adjust_tau"])
+        else:
+            super().__init__(replace_trailing_zeroes=replace_trailing_zeroes, null_prefix_index=0,
+                             logit_adjust_when=False)
+
         self._n_digits = n_digits
         self._n_ary = n_ary_out
         self._n_dim_emb = embedding_dim
         self._n_distinc_prefix = num_embeddings
+        self._logit_adjustment = logit_adjustment
 
         # prefix hash から HashEmbeddingsを使って n_ary * n_dim_emb 個のparameterをlookupする
         self._logit_layer_weights = HashEmbedding(num_embeddings=num_embeddings, num_hashes=num_hashes,
@@ -47,6 +61,9 @@ class HashCodeAwareLogits(BasePrefixAwareLayer):
         # t_logits: (n_batch, n_digits_so_far, n_ary_out)
         t_logits = torch.matmul(t_weight, t_representation.unsqueeze(-1)).squeeze(-1)
 
+        if self._logit_adjustment:
+            t_logits = super().apply_logit_adjustment(logits=t_logits, sequences=input_sequence)
+
         return t_logits
 
     def init_weights(self, *args, **kwargs):
@@ -56,13 +73,16 @@ class HashCodeAwareLogits(BasePrefixAwareLayer):
 class HashAdditiveCodeAwareLogits(HashCodeAwareLogits):
 
     def __init__(self, n_digits: int, n_ary_out: int,
-                 num_embeddings: int, embedding_dim: int, num_buckets: int, num_hashes=2,
+                 num_embeddings: int, embedding_dim: int, num_buckets: int,
+                 logit_adjustment: bool,
+                 num_hashes=2,
                  replace_trailing_zeroes: bool = False,
                  append_weight: bool = False,
                  **kwargs):
 
         super().__init__(n_digits=n_digits, n_ary_out=n_ary_out, num_embeddings=num_embeddings, embedding_dim=embedding_dim,
-                         num_buckets=num_buckets, num_hashes=num_hashes, replace_trailing_zeroes=replace_trailing_zeroes,
+                         num_buckets=num_buckets, logit_adjustment=logit_adjustment,
+                         num_hashes=num_hashes, replace_trailing_zeroes=replace_trailing_zeroes,
                          append_weight=append_weight, **kwargs)
 
     def forward(self, input_sequence: torch.Tensor, t_representation: torch.Tensor):
@@ -89,6 +109,9 @@ class HashAdditiveCodeAwareLogits(HashCodeAwareLogits):
         t_weight = t_weight_.view((-1, n_digits_so_far, self._n_ary, self._n_dim_emb))
         # t_logits: (n_batch, n_digits_so_far, n_ary_out)
         t_logits = torch.matmul(t_weight, t_representation.unsqueeze(-1)).squeeze(-1)
+
+        if self._logit_adjustment:
+            t_logits = super().apply_logit_adjustment(logits=t_logits, sequences=input_sequence)
 
         return t_logits
 
