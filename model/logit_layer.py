@@ -122,7 +122,7 @@ class HashAdditiveCodeAwareLogits(HashCodeAwareLogits):
 class AdditiveCodeAwareLogits(torch.nn.Module):
 
     def __init__(self, n_digits: int, n_ary_in: int, n_ary_out: int, n_dim_emb: int,
-                 bias: bool = True,
+                 bias: bool = False,
                  depends_on_previous_digits: Optional[int] = None,
                  **kwargs):
 
@@ -200,6 +200,12 @@ class AdditiveCodeAwareLogits(torch.nn.Module):
         t_logits = torch.matmul(t_weight, t_representation.unsqueeze(-1)).squeeze(-1)
 
         return t_logits
+
+    def summary(self):
+        ret = {}
+        for attr_name in ("bias", "depends_on_previous_digits", "n_ary_out"):
+            ret[attr_name] = getattr(self, f"_{attr_name}")
+        return ret
 
 
 class PositionAwareLogits(torch.nn.Module):

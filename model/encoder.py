@@ -435,7 +435,7 @@ class TransformerEncoder(BaseEncoder):
                                                                 n_ary_in=self._n_ary + len(self._pos_index),
                                                                 n_ary_out=self._n_ary,
                                                                 n_dim_emb=self._n_dim_hidden,
-                                                                bias=self._kwargs.get("bias", True),
+                                                                bias=self._kwargs.get("bias", False),
                                                                 depends_on_previous_digits=self._kwargs.get("depends_on_previous_digits", None),
                                                                 max_norm=cfg_emb_layer["max_norm"],
                                                                 padding_idx=cfg_emb_layer["padding_idx"])
@@ -445,8 +445,10 @@ class TransformerEncoder(BaseEncoder):
                                                             num_hashes=self._kwargs.get("num_hashes", 2),
                                                             embedding_dim=self._n_dim_hidden,
                                                             n_digits=self._n_digits, n_ary_out=self._n_ary,
+                                                            logit_adjustment=self._kwargs.get("logit_adjustment", False),
                                                             append_weight=False,
-                                                            replace_trailing_zeroes=False # False = fill with zeroes
+                                                            replace_trailing_zeroes=False, # False = fill with zeroes
+                                                            **self._kwargs.get("logit_adjustment_params", {})
                                                             )
         elif self._logit_layer_type in ("additive_hash", "hash_additive"):
             self._softmax_logit_layer = HashAdditiveCodeAwareLogits(num_buckets=self._kwargs.get("num_buckets", 5000),
@@ -454,8 +456,10 @@ class TransformerEncoder(BaseEncoder):
                                                             num_hashes=self._kwargs.get("num_hashes", 2),
                                                             embedding_dim=self._n_dim_hidden,
                                                             n_digits=self._n_digits, n_ary_out=self._n_ary,
+                                                            logit_adjustment=self._kwargs.get("logit_adjustment", False),
                                                             append_weight=False,
-                                                            replace_trailing_zeroes=False # False = fill with zeroes
+                                                            replace_trailing_zeroes=False, # False = fill with zeroes
+                                                            **self._kwargs.get("logit_adjustment_params", {})
                                                             )
         else:
             raise AssertionError(f"unknown `logit_layer_type` value: {self._logit_layer_type}")
@@ -505,10 +509,14 @@ class TransformerEncoder(BaseEncoder):
             print(f"logit layer doesn't support prefix statistics. do nothing.")
             return
         else:
-            synset_dataset = trainset.synset_dataset if synset_dataset is None else synset_dataset
-            prefix_stats = synset_dataset.count_synset_code_prefix_next_values(trainset, use_index_as_lookup_key=use_prefix_index_as_lookup_key)
-            self._softmax_logit_layer.sense_code_prefix_stats = prefix_stats
-            print(f"sense code prefix stats has been set: {self._softmax_logit_layer.__class__.__name__}")
+            logit_adjustment = getattr(self._softmax_logit_layer, "logit_adjustment", False)
+            if logit_adjustment:
+                synset_dataset = trainset.synset_dataset if synset_dataset is None else synset_dataset
+                prefix_stats = synset_dataset.count_synset_code_prefix_next_values(trainset, use_index_as_lookup_key=use_prefix_index_as_lookup_key)
+                self._softmax_logit_layer.sense_code_prefix_stats = prefix_stats
+                print(f"sense code prefix stats has been set: {self._softmax_logit_layer.__class__.__name__}")
+            else:
+                print(f"`logit_adjustment` is configured as False. do nothing.")
 
     @staticmethod
     def generate_square_subsequent_mask(sz: int) -> torch.Tensor:
@@ -763,4 +771,6 @@ class TransformerEncoder(BaseEncoder):
             "embedding_layer_type": self._embedding_layer_type,
             "n_synset_code_prefix": self.n_synset_code_prefix,
         }
+        if hasattr(self._softmax_logit_layer, "summary"):
+            ret["logit_layer"] = self._softmax_logit_layer.summary()
         return ret

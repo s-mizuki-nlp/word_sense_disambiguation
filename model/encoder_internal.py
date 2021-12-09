@@ -12,8 +12,7 @@ from torch import nn
 import math
 
 from dataset.utils import sequence_to_str
-from .hashembed.embedding import HashFamily
-from collections import Counter, defaultdict
+
 
 def min_excluding_zeroes(values: Iterable[int], default_value=0):
     def is_natural_number(v: int):
@@ -80,13 +79,22 @@ class BasePrefixAwareLayer(torch.nn.Module):
         assert self._sense_code_prefix_index is None, f"prefix index is already set. this attribute is single write only."
         self._sense_code_prefix_index = new_value
 
+    def summary(self):
+        ret = {
+            "null_prefix_index": self._null_prefix_index,
+            "replace_trailing_zeroes": self._replace_trailing_zeroes,
+            "n_sense_code_prefix_index": None if self._sense_code_prefix_index is None else len(self._sense_code_prefix_index),
+            "n_sense_code_prefix_statistics": None if self._sense_code_prefix_statistics is None else len(self._sense_code_prefix_statistics)
+        }
+        return ret
+
 
 class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
 
     def __init__(self, replace_trailing_zeroes: bool,
                  logit_adjust_when: Union[str, bool],
                  num_classes: Optional[int] = None,
-                 logit_adjust_tau: float = 1.0,
+                 logit_adjust_tau: Optional[float] = None,
                  null_prefix_index: Optional[int] = None,
                  unobserved_class_fill_strategy: Union[str, int] = "min",
                  smoothing_alpha: float = 0.1):
@@ -103,6 +111,8 @@ class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
             logit_adjust_when = "none"
         else:
             assert num_classes is not None, f"you must specify `num_classes`"
+            assert logit_adjust_tau is not None, f"you must specify `logit_adjust_tau`"
+
         AVAILABLE_VALUES = ("none", "pre", "post", "train", "inference", "eval")
         assert logit_adjust_when in AVAILABLE_VALUES, f"invalid `logit_adjust_when` value. it must be {AVAILABLE_VALUES}"
 
@@ -186,6 +196,19 @@ class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
         elif self._logit_adjust_when == "none":
             pass
         return logits
+
+    def summary(self):
+        ret = super().summary()
+        for attr_name in ("logit_adjust_when", "logit_adjust_tau", "unobserved_class_fill_strategy", "smoothing_alpha"):
+            ret[attr_name] = getattr(self, f"_{attr_name}")
+        return ret
+
+    @property
+    def logit_adjustment(self):
+        if self._logit_adjust_when == "none":
+            return False
+        else:
+            return True
 
 
 class PositionalEncoding(torch.nn.Module):
