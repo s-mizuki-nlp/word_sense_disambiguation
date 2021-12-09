@@ -242,7 +242,8 @@ class WSDTaskDatasetCollateFunction(object):
                  is_trainset: bool,
                  return_records: bool = True,
                  return_entity_context_attn_mask: bool = False,
-                 num_heads_entity_context_mha: Optional[int] = None):
+                 num_heads_entity_context_mha: Optional[int] = None,
+                 device: Optional[str] = "cpu"):
 
         self._is_trainset = is_trainset
         self._return_records = return_records
@@ -252,6 +253,7 @@ class WSDTaskDatasetCollateFunction(object):
             assert isinstance(num_heads_entity_context_mha, int), \
                 f"you must specify the number of attention heads of MHA module as: `num_heads_entity_context_mha`"
         self._num_heads = num_heads_entity_context_mha
+        self._device = device
 
     def __call__(self, lst_entity_objects: List[Dict[str, Any]]):
         def _list_of(field_name: str):
@@ -271,14 +273,14 @@ class WSDTaskDatasetCollateFunction(object):
             "lemmas": lst_lemmas,
             "pos": lst_pos,
             "subword_spans": lst_subword_spans,
-            "context_sequence_lengths": torch.tensor(lst_context_sequence_lengths),
-            "context_embeddings": utils.pad_and_stack_list_of_tensors(lst_lagged_context_embeddings),
-            "entity_sequence_lengths": torch.tensor(lst_entity_sequence_lengths),
-            "entity_embeddings": utils.pad_and_stack_list_of_tensors(lst_lagged_entity_span_embeddings)
+            "context_sequence_lengths": torch.tensor(lst_context_sequence_lengths).to(self._device),
+            "context_embeddings": utils.pad_and_stack_list_of_tensors(lst_lagged_context_embeddings).to(self._device),
+            "entity_sequence_lengths": torch.tensor(lst_entity_sequence_lengths).to(self._device),
+            "entity_embeddings": utils.pad_and_stack_list_of_tensors(lst_lagged_entity_span_embeddings).to(self._device)
         }
         ## (optional) entity span average vectors
         if "entity_span_avg_vector" in set_field_names:
-            dict_ret["entity_span_avg_vectors"] = torch.stack(_list_of("entity_span_avg_vector"))
+            dict_ret["entity_span_avg_vectors"] = torch.stack(_list_of("entity_span_avg_vector")).to(self._device)
 
         # attention masks used for MultiheadAttention and GlobalAttention module.
         _, device = utils.get_dtype_and_device(dict_ret["context_embeddings"])
@@ -299,8 +301,8 @@ class WSDTaskDatasetCollateFunction(object):
 
         if self._is_trainset:
             # ground truth: synset code
-            dict_ret["ground_truth_synset_codes"] = torch.tensor(_list_of("ground_truth_synset_code"), dtype=torch.long, device=device)
-            dict_ret["ground_truth_synset_code_prefixes"] = torch.tensor(_list_of("ground_truth_synset_code_prefix"), dtype=torch.long, device=device)
+            dict_ret["ground_truth_synset_codes"] = torch.tensor(_list_of("ground_truth_synset_code"), dtype=torch.long).to(self._device)
+            dict_ret["ground_truth_synset_code_prefixes"] = torch.tensor(_list_of("ground_truth_synset_code_prefix"), dtype=torch.long).to(self._device)
             dict_ret["ground_truth_synset_ids"] = _list_of("ground_truth_synset_id")
 
         # other attributes are accumulated as `records` object.
