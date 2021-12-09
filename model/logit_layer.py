@@ -53,6 +53,49 @@ class HashCodeAwareLogits(BasePrefixAwareLayer):
         self._logit_layer_weights.reset_parameters(std=0.00001)
 
 
+class HashAdditiveCodeAwareLogits(HashCodeAwareLogits):
+
+    def __init__(self, n_digits: int, n_ary_out: int,
+                 num_embeddings: int, embedding_dim: int, num_buckets: int, num_hashes=2,
+                 replace_trailing_zeroes: bool = False,
+                 append_weight: bool = False,
+                 **kwargs):
+
+        super().__init__(n_digits=n_digits, n_ary_out=n_ary_out, num_embeddings=num_embeddings, embedding_dim=embedding_dim,
+                         num_buckets=num_buckets, num_hashes=num_hashes, replace_trailing_zeroes=replace_trailing_zeroes,
+                         append_weight=append_weight, **kwargs)
+
+    def forward(self, input_sequence: torch.Tensor, t_representation: torch.Tensor):
+        # input_sequence: (n_batch, n_digits_so_far) input_sequence[b,d] \in {0,n_ary_in}
+        # t_representation: (n_batch, n_digits_so_far, n_dim)
+
+        device = input_sequence.device
+        n_digits_so_far = min(self._n_digits, input_sequence.shape[-1])
+
+        # input_sequence_prefix_hashes: (n_batch, n_digits_so_far)
+        input_sequence_prefix_hashes = self.transform_sequence_to_prefix_indices(input_sequence)
+
+        # lst_base_weights[d] = logit_layer_weights(index(y_{<d}))
+        lst_base_weights = [self._logit_layer_weights.forward(prefix_hashes_d) for prefix_hashes_d in torch.split(input_sequence_prefix_hashes, 1, dim=1)]
+        # t_base_weight: (n_batch, n_digits_so_far, n_ary_out * n_dim)
+        t_base_weight = torch.stack(lst_base_weights, dim=1)
+
+        t_weight_ = torch.cumsum(t_base_weight, dim=1)
+        # by dividing number of digits, it may avoid nan error.
+        # t_denom: (1, n_digits_so_far, 1)
+        t_denom = torch.arange(start=1, end=n_digits_so_far+1, device=device).view(1, -1, 1)
+        t_weight_ = t_weight_ / t_denom
+        # t_weight: (n_batch, n_digits_so_far, n_ary_out, n_dim)
+        t_weight = t_weight_.view((-1, n_digits_so_far, self._n_ary_out, self._n_dim_emb))
+        # t_logits: (n_batch, n_digits_so_far, n_ary_out)
+        t_logits = torch.matmul(t_weight, t_representation.unsqueeze(-1)).squeeze(-1)
+
+        return t_logits
+
+    def init_weights(self, *args, **kwargs):
+        self._logit_layer_weights.reset_parameters(std=0.00001)
+
+
 class AdditiveCodeAwareLogits(torch.nn.Module):
 
     def __init__(self, n_digits: int, n_ary_in: int, n_ary_out: int, n_dim_emb: int,

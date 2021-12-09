@@ -17,7 +17,7 @@ from dataset.lexical_knowledge import SynsetDataset
 from .onmt.global_attention import GlobalAttention
 from .encoder_internal import \
     PositionalEncoding
-from .logit_layer import HashCodeAwareLogits, AdditiveCodeAwareLogits, PositionAwareLogits
+from .logit_layer import HashCodeAwareLogits, HashAdditiveCodeAwareLogits, AdditiveCodeAwareLogits, PositionAwareLogits
 from .embedding_layer import HashCodeAwareEmbedding, PositionAwareEmbedding
 
 
@@ -440,7 +440,16 @@ class TransformerEncoder(BaseEncoder):
                                                                 max_norm=cfg_emb_layer["max_norm"],
                                                                 padding_idx=cfg_emb_layer["padding_idx"])
         elif self._logit_layer_type == "hash":
-            self._softmax_logit_layer = HashCodeAwareLogits(num_buckets=self._kwargs.get("num_buckets", 10000),
+            self._softmax_logit_layer = HashCodeAwareLogits(num_buckets=self._kwargs.get("num_buckets", 5000),
+                                                            num_embeddings=self._n_synset_code_prefix+1,
+                                                            num_hashes=self._kwargs.get("num_hashes", 2),
+                                                            embedding_dim=self._n_dim_hidden,
+                                                            n_digits=self._n_digits, n_ary_out=self._n_ary,
+                                                            append_weight=False,
+                                                            replace_trailing_zeroes=False # False = fill with zeroes
+                                                            )
+        elif self._logit_layer_type in ("additive_hash", "hash_additive"):
+            self._softmax_logit_layer = HashAdditiveCodeAwareLogits(num_buckets=self._kwargs.get("num_buckets", 5000),
                                                             num_embeddings=self._n_synset_code_prefix+1,
                                                             num_hashes=self._kwargs.get("num_hashes", 2),
                                                             embedding_dim=self._n_dim_hidden,
