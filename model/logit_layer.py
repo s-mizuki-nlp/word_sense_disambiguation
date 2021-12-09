@@ -86,7 +86,7 @@ class HashAdditiveCodeAwareLogits(HashCodeAwareLogits):
         t_denom = torch.arange(start=1, end=n_digits_so_far+1, device=device).view(1, -1, 1)
         t_weight_ = t_weight_ / t_denom
         # t_weight: (n_batch, n_digits_so_far, n_ary_out, n_dim)
-        t_weight = t_weight_.view((-1, n_digits_so_far, self._n_ary_out, self._n_dim_emb))
+        t_weight = t_weight_.view((-1, n_digits_so_far, self._n_ary, self._n_dim_emb))
         # t_logits: (n_batch, n_digits_so_far, n_ary_out)
         t_logits = torch.matmul(t_weight, t_representation.unsqueeze(-1)).squeeze(-1)
 
