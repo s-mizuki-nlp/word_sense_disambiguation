@@ -21,7 +21,7 @@ from config_files.wsd_task import WSDTaskDataLoader
 from dataset import WSDTaskDataset
 from dataset.lexical_knowledge import SynsetDataset
 from dataset.evaluation import EntityLevelWSDEvaluationDataset
-
+from dataset.utils import tensor_to_device, str_to_list
 
 class BaseEvaluator(object):
 
@@ -128,6 +128,7 @@ class WSDTaskEvaluatorBase(BaseEvaluatorByRaganato, metaclass=ABCMeta):
                  ground_truth_lemma_keys_field_name: str = "ground_truth_lemma_keys",
                  evaluation_category: str = "lemma",
                  breakdown_attributes: Optional[Iterable[Set[str]]] = None,
+                 device: Optional[Any] = "cpu",
                  verbose: bool = False,
                  **kwargs_dataloader):
 
@@ -143,7 +144,9 @@ class WSDTaskEvaluatorBase(BaseEvaluatorByRaganato, metaclass=ABCMeta):
         if isinstance(evaluation_dataset, WSDTaskDataset):
             self._evaluation_data_loader = WSDTaskDataLoader(evaluation_dataset, batch_size=1)
         elif isinstance(evaluation_dataset, EntityLevelWSDEvaluationDataset):
-            self._evaluation_data_loader = DataLoader(evaluation_dataset, batch_size=1, collate_fn=lambda v:v, **kwargs_dataloader)
+            self._evaluation_data_loader = DataLoader(evaluation_dataset, batch_size=1,
+                                                      collate_fn=lambda v: tensor_to_device(v, device=device),
+                                                      **kwargs_dataloader)
         else:
             raise ValueError(f"unknown dataset: {type(evaluation_dataset)}")
 

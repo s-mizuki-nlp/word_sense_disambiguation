@@ -33,6 +33,39 @@ def tensor_to_numpy(object: Array_like) -> torch.Tensor:
 def get_dtype_and_device(t: torch.Tensor):
     return t.dtype, t.device
 
+def tensor_to_device(object: Any, device):
+    if isinstance(object, torch.Tensor):
+        return object.to(device)
+    else:
+        return object
+
+def str_to_list(object: Any):
+    if isinstance(object, str):
+        return [object]
+    else:
+        return object
+
+def batch_tile(objects: Dict[str, Any], dim: int, n_reps: int):
+    """
+    replicate torch tensor along with specified dimension.
+
+    @param objects: dictionary of objects. it should include torch.Tensor objects.
+    @param dim: dimension to be replicated.
+    @param n_reps: number of replications.
+    @return: dictionary of objects.
+    """
+    ret = {}
+    for key, object in objects.items():
+        if isinstance(object, torch.Tensor):
+            dims = [1,]* object.ndim
+            dims[dim] = n_reps
+            ret[key] = torch.tile(object, dims)
+        elif isinstance(object, List):
+            ret[key] = [object[0],] * n_reps
+        else:
+            ret[key] = object
+    return ret
+
 def lemma_pos_to_tuple(lemma: str, pos: str, lemma_lowercase: bool, **kwargs):
     if lemma_lowercase:
         return (lemma.lower(), pos)

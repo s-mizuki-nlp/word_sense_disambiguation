@@ -12,7 +12,7 @@ from model.loss_supervised import HyponymyScoreLoss
 from .wsd_baseline import MostFrequentSenseWSDTaskEvaluator, WSDTaskEvaluatorBase, numeric
 from dataset import WSDTaskDataset
 from dataset.lexical_knowledge import SynsetDataset
-from dataset.utils import tensor_to_numpy
+from dataset.utils import tensor_to_numpy, batch_tile
 
 
 class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
@@ -30,6 +30,7 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
                  lexical_knowledge_synset_dataset: Optional[SynsetDataset] = None,
                  ground_truth_lemma_keys_field_name: str = "ground_truth_lemma_keys",
                  breakdown_attributes: Optional[Iterable[Set[str]]] = None,
+                 device: Optional[str] = "cpu",
                  verbose: bool = False,
                  **kwargs_dataloader):
         super().__init__(
@@ -37,6 +38,7 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
             evaluation_category=evaluation_category,
             ground_truth_lemma_keys_field_name=ground_truth_lemma_keys_field_name,
             breakdown_attributes=breakdown_attributes,
+            device=device,
             verbose=verbose,
             **kwargs_dataloader)
 
@@ -178,14 +180,12 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
             t_code_probs = torch.tile(t_code_prob, (n_candidates, 1, 1))
         else:
             # compute conditional probability Pr{Y_d|y_{<d}} for each candidates
-            lst_code_probs = []
-            for t_candidate_code in torch.split(t_candidate_codes, 1, dim=0):
-                input["ground_truth_synset_codes"] = t_candidate_code
-                _, t_code_prob = self._model._predict(**input, apply_argmax_on_inference=True)
-                del input["ground_truth_synset_codes"]
-                lst_code_probs.append(t_code_prob.squeeze(dim=0))
-            t_code_probs = torch.stack(lst_code_probs, dim=0)
+            input["pos"] = [input["pos"]]
+            input["subword_spans"] = [input["subword_spans"]]
+            input = batch_tile(input, dim=0, n_reps=n_candidates)
+            input["ground_truth_synset_codes"] = t_candidate_codes
 
+            _, t_code_probs = self._model._predict(**input, apply_argmax_on_inference=True)
         if apply_one_hot_encoding:
             t_code_probs = t_code_probs.argmax(dim=-1)
             t_code_probs = self._aux_hyponymy_score._one_hot_encoding(t_codes=t_code_probs, n_ary=self._model.n_ary, label_smoothing_factor=0.0)
