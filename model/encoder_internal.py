@@ -94,7 +94,7 @@ class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
     def __init__(self, replace_trailing_zeroes: bool,
                  logit_adjust_when: Union[str, bool],
                  num_classes: Optional[int] = None,
-                 logit_adjust_tau: Optional[float] = None,
+                 logit_adjust_tau: float = 1.0,
                  null_prefix_index: Optional[int] = None,
                  unobserved_class_fill_strategy: Union[str, int] = "min",
                  smoothing_alpha: float = 0.1):
@@ -109,9 +109,11 @@ class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
 
         if isinstance(logit_adjust_when, bool) and (logit_adjust_when == False):
             logit_adjust_when = "none"
+            logit_adjust_tau = None
+            unobserved_class_fill_strategy = None
+            smoothing_alpha = None
         else:
             assert num_classes is not None, f"you must specify `num_classes`"
-            assert logit_adjust_tau is not None, f"you must specify `logit_adjust_tau`"
 
         AVAILABLE_VALUES = ("none", "pre", "post", "train", "inference", "eval")
         assert logit_adjust_when in AVAILABLE_VALUES, f"invalid `logit_adjust_when` value. it must be {AVAILABLE_VALUES}"
