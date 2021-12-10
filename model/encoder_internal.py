@@ -152,7 +152,7 @@ class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
             lst_lst_lst_counts.append(lst_lst_counts)
 
         # t_prior: (n_batch, n_digits_so_far, n_ary_out)
-        t_prior = torch.Tensor(lst_lst_lst_counts, device=device)
+        t_prior = torch.Tensor(lst_lst_lst_counts, device="cpu").to(device)
         # normalize for each class
         t_prior = t_prior / t_prior.sum(dim=-1, keepdim=True)
 
