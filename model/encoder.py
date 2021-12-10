@@ -17,7 +17,6 @@ from dataset.lexical_knowledge import SynsetDataset
 from .onmt.global_attention import GlobalAttention
 from .encoder_internal import \
     PositionalEncoding
-from .logit_layer import HashCodeAwareLogits, HashAdditiveCodeAwareLogits, AdditiveCodeAwareLogits, PositionAwareLogits
 from .embedding_layer import HashCodeAwareEmbedding, PositionAwareEmbedding
 
 

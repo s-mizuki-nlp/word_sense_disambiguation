@@ -162,10 +162,13 @@ class SenseCodeTrainer(LightningModule):
                             setattr(model._encoder, "_embedding_code_boc", p_emb_code_)
             elif model._encoder.__class__.__name__ == "TransformerEncoder":
                 logit_layer = model._encoder._softmax_logit_layer
-                # 23a12b7
                 if isinstance(logit_layer, BaseLogitAdjustableLayer):
+                    # 23a12b7
                     if not hasattr(logit_layer, "_logit_adjustment"):
                         setattr(logit_layer, "_logit_adjustment", False)
+                    # 
+                    if not hasattr(logit_layer, "_additive"):
+                        setattr(logit_layer, "_additive", False)
             else:
                 pass
 
