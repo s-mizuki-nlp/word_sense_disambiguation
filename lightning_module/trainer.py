@@ -166,7 +166,7 @@ class SenseCodeTrainer(LightningModule):
                     # 23a12b7
                     if not hasattr(logit_layer, "_logit_adjustment"):
                         setattr(logit_layer, "_logit_adjustment", False)
-                    # 
+                    # c883c91
                     if not hasattr(logit_layer, "_additive"):
                         setattr(logit_layer, "_additive", False)
             else:
@@ -334,7 +334,23 @@ class SenseCodeTrainer(LightningModule):
         for metric_name, validation_metric_name in self.metrics.items():
             self.log(metric_name, metrics_repr[validation_metric_name])
 
-        return None
+        # return list of generated codes
+        lst_codes = []
+        for code in t_codes_greedy.tolist():
+            lst_codes.append("-".join(map(str, code)))
+
+        return {"generated_codes": lst_codes}
+
+    def validation_epoch_end(self, validation_step_outputs) -> None:
+        set_codes = set()
+        n_code = 0
+        for output in validation_step_outputs:
+            lst_codes = output["generated_codes"]
+            n_code += len(lst_codes)
+            set_codes.update(lst_codes)
+        n_code_unique = len(set_codes)
+        self.log("val_unique_code_ratio", n_code_unique / n_code)
+        self.log("hp/unique_code_ratio", n_code_unique / n_code)
 
     def test_step(self, batch, batch_idx):
         # ToDo: call WSD evaluator
