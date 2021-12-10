@@ -3,6 +3,7 @@
 from __future__ import division, absolute_import, print_function, unicode_literals
 
 from typing import Optional, Union
+import math
 
 import torch
 from torch import nn
@@ -17,9 +18,9 @@ class HashCodeAwareLogits(BaseLogitAdjustableLayer):
                  num_embeddings: int, embedding_dim: int, num_buckets: int,
                  additive: bool,
                  logit_adjustment: bool,
+                 matrix_rank_reduction: bool = False,
                  num_hashes=2,
                  replace_trailing_zeroes: bool = False,
-                 append_weight: bool = False,
                  **kwargs):
 
         if logit_adjustment:
@@ -40,11 +41,21 @@ class HashCodeAwareLogits(BaseLogitAdjustableLayer):
         self._n_distinc_prefix = num_embeddings
         self._logit_adjustment = logit_adjustment
         self._additive = additive
+        self._matrix_rank_reduction = matrix_rank_reduction
+        if matrix_rank_reduction:
+            self._matrix_rank = max(int(math.sqrt(n_ary_out)), n_ary_out // 8)
+        else:
+            self._matrix_rank = n_ary_out
 
         # prefix hash から HashEmbeddingsを使って n_ary * n_dim_emb 個のparameterをlookupする
+        if matrix_rank_reduction:
+            _embedding_dim = (n_ary_out + embedding_dim) * self._matrix_rank
+        else:
+            _embedding_dim = embedding_dim*n_ary_out
+
         self._logit_layer_weights = HashEmbedding(num_embeddings=num_embeddings, num_hashes=num_hashes,
-                                                  embedding_dim=embedding_dim*n_ary_out - num_hashes if append_weight else embedding_dim*n_ary_out,
-                                                  num_buckets=num_buckets, append_weight=append_weight)
+                                                  embedding_dim=_embedding_dim,
+                                                  num_buckets=num_buckets, append_weight=False)
 
     def forward(self, input_sequence: torch.Tensor, t_representation: torch.Tensor):
         # input_sequence: (n_batch, n_digits_so_far) input_sequence[b,d] \in {0,n_ary_in}
@@ -66,9 +77,20 @@ class HashCodeAwareLogits(BaseLogitAdjustableLayer):
             t_weight_ = t_weight_ / t_denom
 
         # t_weight: (n_batch, n_digits_so_far, n_ary_out, n_dim)
-        t_weight = t_weight_.view((-1, n_digits_so_far, self._n_ary, self._n_dim_emb))
-        # t_logits: (n_batch, n_digits_so_far, n_ary_out)
-        t_logits = torch.matmul(t_weight, t_representation.unsqueeze(-1)).squeeze(-1)
+        if self._matrix_rank_reduction:
+            # u: (n_batch, n_digits_so_far, n_ary_out, n_rank)
+            # v: (n_batch, n_digits_so_far, n_rank, n_dim)
+            t_weight_u, t_weight_v = torch.split(t_weight_, [self._n_ary*self._matrix_rank, self._n_dim_emb*self._matrix_rank], dim=-1)
+            t_weight_u = t_weight_u.view((-1, n_digits_so_far, self._n_ary, self._matrix_rank))
+            t_weight_v = t_weight_v.view((-1, n_digits_so_far, self._matrix_rank, self._n_dim_emb))
+            # t_logits_: (n_batch, n_digits_so_far, n_rank, 1)
+            t_logits_ = torch.matmul(t_weight_v, t_representation.unsqueeze(-1))
+            # t_logits: (n_batch, n_digits_so_far, n_ary_out)
+            t_logits = torch.matmul(t_weight_u, t_logits_).squeeze(-1)
+        else:
+            t_weight = t_weight_.view((-1, n_digits_so_far, self._n_ary, self._n_dim_emb))
+            # t_logits: (n_batch, n_digits_so_far, n_ary_out)
+            t_logits = torch.matmul(t_weight, t_representation.unsqueeze(-1)).squeeze(-1)
 
         if self._logit_adjustment:
             t_logits = super().apply_logit_adjustment(logits=t_logits, sequences=input_sequence)
@@ -80,6 +102,8 @@ class HashCodeAwareLogits(BaseLogitAdjustableLayer):
 
     def summary(self):
         ret = super().summary()
+        ret["matrix_rank_reduction"] = self._matrix_rank_reduction
+        ret["matrix_rank"] = self._matrix_rank
         ret["num_buckets"] = self._logit_layer_weights.num_buckets
         ret["num_hashes"] = self._logit_layer_weights.num_hashes
         ret["additive"] = self._additive
