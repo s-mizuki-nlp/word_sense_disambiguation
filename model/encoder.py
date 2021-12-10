@@ -457,10 +457,10 @@ class TransformerEncoder(BaseEncoder):
 
         if hasattr(self._softmax_logit_layer, "sense_code_prefix_index"):
             self._softmax_logit_layer.sense_code_prefix_index = sense_code_prefix_index
-            print(f"sense code prefix index is set: {self._softmax_logit_layer.__class__.__name__}")
+            print(f"sense code prefix index is set: {self._softmax_logit_layer.__class__.__name__} -> {len(self._softmax_logit_layer.sense_code_prefix_index)}")
         if hasattr(self._emb_layer, "sense_code_prefix_index"):
             self._emb_layer.sense_code_prefix_index = sense_code_prefix_index
-            print(f"sense code prefix index is set: {self._emb_layer.__class__.__name__}")
+            print(f"sense code prefix index is set: {self._emb_layer.__class__.__name__} -> {len(self._emb_layer.sense_code_prefix_index)}")
 
     def setup_sense_code_prefix_statistics(self, trainset: WSDTaskDataset, synset_dataset: Optional[SynsetDataset] = None,
                                            use_prefix_index_as_lookup_key: bool = True):
@@ -472,8 +472,9 @@ class TransformerEncoder(BaseEncoder):
             if logit_adjustment:
                 synset_dataset = trainset.synset_dataset if synset_dataset is None else synset_dataset
                 prefix_stats = synset_dataset.count_synset_code_prefix_next_values(trainset, use_index_as_lookup_key=use_prefix_index_as_lookup_key)
-                self._softmax_logit_layer.sense_code_prefix_stats = prefix_stats
-                print(f"sense code prefix stats has been set: {self._softmax_logit_layer.__class__.__name__}")
+                self._softmax_logit_layer.sense_code_prefix_statistics = prefix_stats
+                assert self._softmax_logit_layer.sense_code_prefix_statistics is not None, f"something went wrong: {self._softmax_logit_layer.__dict__}"
+                print(f"sense code prefix stats has been set: {len(self._softmax_logit_layer.sense_code_prefix_statistics)}")
             else:
                 print(f"`logit_adjustment` is configured as False. do nothing.")
 

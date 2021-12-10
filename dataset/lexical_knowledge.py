@@ -294,7 +294,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
         result = {}
         # initialize by sense code taxonomy.
         for str_prefix, record in self._sense_code_taxonomy.items():
-            lookup_key = record["idx"] if use_idex_as_lookup_key else str_prefix
+            lookup_key = record["idx"] if use_index_as_lookup_key else str_prefix
             result[lookup_key] = {}
             for possible_value in record["next_values"]:
                 result[lookup_key][possible_value] = 0
