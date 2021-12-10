@@ -317,7 +317,7 @@ class TransformerEncoder(BaseEncoder):
                  num_decoder_layers: int,
                  n_head: int,
                  pos_index: Dict[str, int],
-                 n_synset_code_prefix: Optional[int] = None,
+                 softmax_logit_layer: nn.Module,
                  memory_encoder_input_feature: str = "entity",
                  layer_normalization: bool = False,
                  norm_digit_embeddings: bool = False,
@@ -327,7 +327,6 @@ class TransformerEncoder(BaseEncoder):
                  batch_first: bool = True,
                  prob_zero_monotone_increasing: bool = False,
                  embedding_layer_type: str = "default",
-                 logit_layer_type: str = "default",
                  **kwargs):
 
         super().__init__(n_ary=n_ary)
@@ -343,8 +342,8 @@ class TransformerEncoder(BaseEncoder):
 
         self._n_dim_hidden = n_dim_emb
         self._n_digits = n_digits
+        self._softmax_logit_layer = softmax_logit_layer
         # self._n_ary = n_ary
-        self._n_synset_code_prefix = n_synset_code_prefix
         self._pos_index = pos_index
         self._num_encoder_layers = num_encoder_layers
         self._memory_encoder_input_feature = memory_encoder_input_feature
@@ -358,7 +357,7 @@ class TransformerEncoder(BaseEncoder):
         self._batch_first = batch_first
         self._prob_zero_monotone_increasing = prob_zero_monotone_increasing
         self._embedding_layer_type = embedding_layer_type
-        self._logit_layer_type = logit_layer_type
+
         self._kwargs = kwargs
 
         self._build()
@@ -426,43 +425,44 @@ class TransformerEncoder(BaseEncoder):
         self._decoder = nn.TransformerDecoder(decoder_layer, num_layers=self._num_decoder_layers, norm=norm)
 
         # logit layer
-        if self._logit_layer_type == "default":
-            self._softmax_logit_layer = PositionAwareLogits(n_seq_len=None, in_features=self._n_dim_hidden, out_features=self._n_ary)
-        elif self._logit_layer_type == "position_aware":
-            self._softmax_logit_layer = PositionAwareLogits(n_seq_len=self._n_digits, in_features=self._n_dim_hidden, out_features=self._n_ary)
-        elif self._logit_layer_type == "additive":
-            self._softmax_logit_layer = AdditiveCodeAwareLogits(n_digits=self._n_digits,
-                                                                n_ary_in=self._n_ary + len(self._pos_index),
-                                                                n_ary_out=self._n_ary,
-                                                                n_dim_emb=self._n_dim_hidden,
-                                                                bias=self._kwargs.get("bias", False),
-                                                                depends_on_previous_digits=self._kwargs.get("depends_on_previous_digits", None),
-                                                                max_norm=cfg_emb_layer["max_norm"],
-                                                                padding_idx=cfg_emb_layer["padding_idx"])
-        elif self._logit_layer_type == "hash":
-            self._softmax_logit_layer = HashCodeAwareLogits(num_buckets=self._kwargs.get("num_buckets", 5000),
-                                                            num_embeddings=self._n_synset_code_prefix+1,
-                                                            num_hashes=self._kwargs.get("num_hashes", 2),
-                                                            embedding_dim=self._n_dim_hidden,
-                                                            n_digits=self._n_digits, n_ary_out=self._n_ary,
-                                                            logit_adjustment=self._kwargs.get("logit_adjustment", False),
-                                                            append_weight=False,
-                                                            replace_trailing_zeroes=False, # False = fill with zeroes
-                                                            **self._kwargs.get("logit_adjustment_params", {})
-                                                            )
-        elif self._logit_layer_type in ("additive_hash", "hash_additive"):
-            self._softmax_logit_layer = HashAdditiveCodeAwareLogits(num_buckets=self._kwargs.get("num_buckets", 5000),
-                                                            num_embeddings=self._n_synset_code_prefix+1,
-                                                            num_hashes=self._kwargs.get("num_hashes", 2),
-                                                            embedding_dim=self._n_dim_hidden,
-                                                            n_digits=self._n_digits, n_ary_out=self._n_ary,
-                                                            logit_adjustment=self._kwargs.get("logit_adjustment", False),
-                                                            append_weight=False,
-                                                            replace_trailing_zeroes=False, # False = fill with zeroes
-                                                            **self._kwargs.get("logit_adjustment_params", {})
-                                                            )
-        else:
-            raise AssertionError(f"unknown `logit_layer_type` value: {self._logit_layer_type}")
+        # if self._logit_layer_type == "default":
+        #     self._softmax_logit_layer = PositionAwareLogits(n_seq_len=None, in_features=self._n_dim_hidden, out_features=self._n_ary)
+        # elif self._logit_layer_type == "position_aware":
+        #     self._softmax_logit_layer = PositionAwareLogits(n_seq_len=self._n_digits, in_features=self._n_dim_hidden, out_features=self._n_ary)
+        # elif self._logit_layer_type == "additive":
+        #     self._softmax_logit_layer = AdditiveCodeAwareLogits(n_digits=self._n_digits,
+        #                                                         n_ary_in=self._n_ary + len(self._pos_index),
+        #                                                         n_ary_out=self._n_ary,
+        #                                                         n_dim_emb=self._n_dim_hidden,
+        #                                                         bias=self._kwargs.get("bias", False),
+        #                                                         depends_on_previous_digits=self._kwargs.get("depends_on_previous_digits", None),
+        #                                                         max_norm=cfg_emb_layer["max_norm"],
+        #                                                         padding_idx=cfg_emb_layer["padding_idx"])
+        # elif self._logit_layer_type == "hash":
+        #     self._softmax_logit_layer = HashCodeAwareLogits(num_buckets=self._kwargs.get("num_buckets", 5000),
+        #                                                     num_embeddings=self._n_synset_code_prefix+1,
+        #                                                     num_hashes=self._kwargs.get("num_hashes", 2),
+        #                                                     embedding_dim=self._n_dim_hidden,
+        #                                                     n_digits=self._n_digits, n_ary_out=self._n_ary,
+        #                                                     logit_adjustment=self._kwargs.get("logit_adjustment", False),
+        #                                                     append_weight=False,
+        #                                                     replace_trailing_zeroes=False, # False = fill with zeroes
+        #                                                     **self._kwargs.get("logit_adjustment_params", {})
+        #                                                     )
+        # elif self._logit_layer_type in ("additive_hash", "hash_additive"):
+        #     self._softmax_logit_layer = HashAdditiveCodeAwareLogits(num_buckets=self._kwargs.get("num_buckets", 5000),
+        #                                                     num_embeddings=self._n_synset_code_prefix+1,
+        #                                                     num_hashes=self._kwargs.get("num_hashes", 2),
+        #                                                     embedding_dim=self._n_dim_hidden,
+        #                                                     n_digits=self._n_digits,
+        #                                                     n_ary_out=self._n_ary,
+        #                                                     logit_adjustment=self._kwargs.get("logit_adjustment", False),
+        #                                                     append_weight=False,
+        #                                                     replace_trailing_zeroes=False, # False = fill with zeroes
+        #                                                     **self._kwargs.get("logit_adjustment_params", {})
+        #                                                     )
+        # else:
+        #     raise AssertionError(f"unknown `logit_layer_type` value: {self._logit_layer_type}")
 
         self._init_weights()
 
@@ -767,9 +767,7 @@ class TransformerEncoder(BaseEncoder):
             "memory_encoder_input_feature": self._memory_encoder_input_feature,
             "pos_index": self._pos_index,
             "layer_normalization": self._layer_normalization,
-            "logit_layer_type": self._logit_layer_type,
             "embedding_layer_type": self._embedding_layer_type,
-            "n_synset_code_prefix": self.n_synset_code_prefix,
         }
         if hasattr(self._softmax_logit_layer, "summary"):
             ret["logit_layer"] = self._softmax_logit_layer.summary()

@@ -42,8 +42,7 @@ class HashCodeAwareLogits(BaseLogitAdjustableLayer):
         # prefix hash から HashEmbeddingsを使って n_ary * n_dim_emb 個のparameterをlookupする
         self._logit_layer_weights = HashEmbedding(num_embeddings=num_embeddings, num_hashes=num_hashes,
                                                   embedding_dim=embedding_dim*n_ary_out - num_hashes if append_weight else embedding_dim*n_ary_out,
-                                                  num_buckets=num_buckets, append_weight=append_weight,
-                                                  **kwargs)
+                                                  num_buckets=num_buckets, append_weight=append_weight)
 
     def forward(self, input_sequence: torch.Tensor, t_representation: torch.Tensor):
         # input_sequence: (n_batch, n_digits_so_far) input_sequence[b,d] \in {0,n_ary_in}
@@ -203,7 +202,7 @@ class AdditiveCodeAwareLogits(torch.nn.Module):
 
     def summary(self):
         ret = {}
-        for attr_name in ("bias", "depends_on_previous_digits", "n_ary_out"):
+        for attr_name in ("bias", "depends_on_previous_digits", "n_ary_in", "n_ary_out"):
             ret[attr_name] = getattr(self, f"_{attr_name}")
         return ret
 
@@ -240,3 +239,8 @@ class PositionAwareLogits(torch.nn.Module):
             t_logits = self.linear_layers.forward(t_representation)
         # t_logits: (n_batch, n_digits_so_far, n_ary)
         return t_logits
+
+    def summary(self):
+        ret = {
+            "n_seq_len": self.n_seq_len
+        }
