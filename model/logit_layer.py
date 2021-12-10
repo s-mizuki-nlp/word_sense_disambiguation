@@ -80,6 +80,8 @@ class HashCodeAwareLogits(BaseLogitAdjustableLayer):
 
     def summary(self):
         ret = super().summary()
+        ret["num_buckets"] = self._logit_layer_weights.num_buckets
+        ret["num_hashes"] = self._logit_layer_weights.num_hashes
         ret["additive"] = self._additive
         return ret
 
