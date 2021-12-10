@@ -22,6 +22,7 @@ from pytorch_lightning import LightningModule
 
 from model import HierarchicalCodeEncoder
 from model.loss_supervised import HyponymyScoreLoss, EntailmentProbabilityLoss, CrossEntropyLossWrapper
+from model.encoder_internal import BaseLogitAdjustableLayer
 from custom.optimizer import AdamWithWarmup
 
 class SenseCodeTrainer(LightningModule):
@@ -160,7 +161,11 @@ class SenseCodeTrainer(LightningModule):
                             setattr(model._encoder, "_pos_index", {"n":0, "v":0})
                             setattr(model._encoder, "_embedding_code_boc", p_emb_code_)
             elif model._encoder.__class__.__name__ == "TransformerEncoder":
-                pass
+                logit_layer = model._encoder._softmax_logit_layer
+                # 23a12b7
+                if isinstance(logit_layer, BaseLogitAdjustableLayer):
+                    if not hasattr(logit_layer, "_logit_adjustment"):
+                        setattr(logit_layer, "_logit_adjustment", False)
             else:
                 pass
 
