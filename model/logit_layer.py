@@ -94,11 +94,10 @@ class HashAdditiveCodeAwareLogits(HashCodeAwareLogits):
         # input_sequence_prefix_hashes: (n_batch, n_digits_so_far)
         input_sequence_prefix_hashes = self.transform_sequence_to_prefix_indices(input_sequence)
 
-        # lst_base_weights[d] = logit_layer_weights(index(y_{<d}))
-        lst_base_weights = [self._logit_layer_weights.forward(prefix_hashes_d) for prefix_hashes_d in torch.split(input_sequence_prefix_hashes, 1, dim=1)]
         # t_base_weight: (n_batch, n_digits_so_far, n_ary_out * n_dim)
-        t_base_weight = torch.stack(lst_base_weights, dim=1).squeeze()
+        t_base_weight = self._logit_layer_weights.forward(input_sequence_prefix_hashes)
 
+        # moving average from top to d-th digits.
         t_weight_ = torch.cumsum(t_base_weight, dim=1)
         # by dividing number of digits, it may avoid nan error.
         # t_denom: (1, n_digits_so_far, 1)

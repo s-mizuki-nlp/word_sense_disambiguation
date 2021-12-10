@@ -728,6 +728,7 @@ class TransformerEncoder(BaseEncoder):
             "pos_index": self._pos_index,
             "layer_normalization": self._layer_normalization,
             "embedding_layer_type": self._embedding_layer_type,
+            "logit_layer_class": self._softmax_logit_layer.__class__.__name__
         }
         if hasattr(self._softmax_logit_layer, "summary"):
             ret["logit_layer"] = self._softmax_logit_layer.summary()
