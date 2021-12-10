@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 from __future__ import division
 from __future__ import print_function
 
+import warnings
 from typing import Dict, Optional, List, Iterable, Union
 
 import torch
@@ -135,7 +136,7 @@ class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
         assert self._sense_code_prefix_statistics is None, f"prefix statistics is already set. this attribute is single write only."
         self._sense_code_prefix_statistics = new_value
 
-    def get_prior_probabilities(self, sequences: torch.Tensor) -> torch.Tensor:
+    def get_prior_probabilities(self, sequences: torch.Tensor, log: bool = False, eps=1E-15) -> torch.Tensor:
         """
         returns class-prior probability of each position in the sequence based on prefix statistics.
 
@@ -147,13 +148,16 @@ class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
         # (n_batch, n_digits_so_far)
         sequence_prefix_indices = self.transform_sequence_to_prefix_indices(sequences)
         for prefix_indices in sequence_prefix_indices.tolist():
-            lst_counts = [self.get_sense_code_prefix_counts(index) for index in prefix_indices]
-            lst_lst_lst_counts.append(lst_counts)
+            lst_lst_counts = [self.get_sense_code_prefix_counts(index) for index in prefix_indices]
+            lst_lst_lst_counts.append(lst_lst_counts)
 
         # t_prior: (n_batch, n_digits_so_far, n_ary_out)
         t_prior = torch.Tensor(lst_lst_lst_counts, device=device)
         # normalize for each class
         t_prior = t_prior / t_prior.sum(dim=-1, keepdim=True)
+
+        if log:
+            t_prior = torch.log(t_prior + eps)
 
         return t_prior
 
@@ -187,14 +191,14 @@ class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
         # logits: (n_batch, n_digits_so_far, n_ary)
         if self._logit_adjust_when in ("pre","train"):
             if self.training:
-                logits = logits + self._logit_adjust_tau * self.get_prior_probabilities(sequences)
+                logits = logits + self._logit_adjust_tau * self.get_prior_probabilities(sequences, log=True)
             else:
                 pass
         elif self._logit_adjust_when in ("post","inference","eval"):
             if self.training:
                 pass
             else:
-                logits = logits - self._logit_adjust_tau * self.get_prior_probabilities(sequences)
+                logits = logits - self._logit_adjust_tau * self.get_prior_probabilities(sequences, log=True)
         elif self._logit_adjust_when == "none":
             pass
         return logits
@@ -211,6 +215,17 @@ class BaseLogitAdjustableLayer(BasePrefixAwareLayer):
             return False
         else:
             return True
+
+    @property
+    def logit_adjust_tau(self):
+        return self._logit_adjust_tau
+
+    @logit_adjust_tau.setter
+    def logit_adjust_tau(self, tau: float):
+        if self._logit_adjust_when in ("post","inference","eval"):
+            self._logit_adjust_tau = tau
+        else:
+            warnings.warn(f"you can't update \tau parameter: {self._logit_adjust_when}")
 
 
 class PositionalEncoding(torch.nn.Module):
