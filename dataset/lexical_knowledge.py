@@ -324,6 +324,20 @@ class SynsetDataset(NDJSONDataset, Dataset):
 
         return result
 
+    def validate_synset_code_prefix_statistics(self, prefix_statistics: Dict[int, Dict[int, int]]):
+        """
+        validate given prefix statistics by comparing it with sense code taxonomy info.
+
+        @param prefix_statistics: dictionary of the dictionary of next-value freqs. dictionary key must be prefix index.
+        @return: passed = True, failed = False
+        """
+        for prefix_index, dict_freq in prefix_statistics.items():
+            dict_prefix_info = self.get_synset_code_prefix_info(partial_sense_code_or_prefix_index=prefix_index)
+            expected = dict_prefix_info["next_values"]
+            actual = set(dict_freq.keys())
+            assert actual == expected, f"invalid prefix index was detected: {prefix_index} -> {actual}"
+        print("validation suceeded.")
+
     def synset_code_to_prefix(self, partial_sense_code: List[int], pos: Optional[str] = None) -> List[int]:
         n_length = len(partial_sense_code) - partial_sense_code.count(0)
         if pos is not None:
@@ -340,7 +354,7 @@ class SynsetDataset(NDJSONDataset, Dataset):
         key = self.sequence_to_str(sense_code_prefix)
         return self._sense_code_taxonomy[key]
 
-    def get_synset_code_prefix_info(self, partial_sense_code_or_prefix_index: Union[int, List[int]], pos: Optional[str] = None):
+    def get_synset_code_prefix_info(self, partial_sense_code_or_prefix_index: Union[int, List[int]], pos: Optional[str] = None) -> Dict[str, Any]:
         """
         return the taxonomical information (e.g., next values, number of descendents).
         This is useful for inference including post-hoc

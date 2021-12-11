@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
-import copy
+import json
+import os.path
 import warnings
 from typing import Optional, Dict, Any, Union, Tuple, List, Iterable
 
-import math
+import io, math, copy
 import numpy as np
 import torch
 from torch import nn
@@ -463,7 +464,8 @@ class TransformerEncoder(BaseEncoder):
             print(f"sense code prefix index is set: {self._emb_layer.__class__.__name__} -> {len(self._emb_layer.sense_code_prefix_index)}")
 
     def setup_sense_code_prefix_statistics(self, trainset: WSDTaskDataset, synset_dataset: Optional[SynsetDataset] = None,
-                                           use_prefix_index_as_lookup_key: bool = True):
+                                           use_prefix_index_as_lookup_key: bool = True,
+                                           path_cache: str = None):
         if not hasattr(self._softmax_logit_layer, "sense_code_prefix_statistics"):
             print(f"logit layer doesn't support prefix statistics. do nothing.")
             return
@@ -471,7 +473,25 @@ class TransformerEncoder(BaseEncoder):
             logit_adjustment = getattr(self._softmax_logit_layer, "logit_adjustment", False)
             if logit_adjustment:
                 synset_dataset = trainset.synset_dataset if synset_dataset is None else synset_dataset
-                prefix_stats = synset_dataset.count_synset_code_prefix_next_values(trainset, use_index_as_lookup_key=use_prefix_index_as_lookup_key)
+
+                if (path_cache is not None) and os.path.exists(path_cache):
+                    print(f"loading prefix statistics from cache file: {path_cache}")
+                    def _key_str_to_int(x):
+                        if isinstance(x, dict):
+                            return {int(k):v for k,v in x.items()}
+                        return x
+                    with io.open(path_cache, mode="r") as ifs:
+                        prefix_stats = json.load(ifs, object_hook=_key_str_to_int)
+                    print("validating compatibility of loaded prefix statistics with synset dataset.")
+                    synset_dataset.validate_synset_code_prefix_statistics(prefix_statistics=prefix_stats)
+                else:
+                    print(f"building prefix statistics from trainset...")
+                    prefix_stats = synset_dataset.count_synset_code_prefix_next_values(trainset, use_index_as_lookup_key=use_prefix_index_as_lookup_key)
+                    if (path_cache is not None) and not(os.path.exists(path_cache)):
+                        print(f"prefix statistics will be saved as: {path_cache}")
+                        with io.open(path_cache, mode="w") as ofs:
+                            json.dump(prefix_stats, ofs)
+
                 self._softmax_logit_layer.sense_code_prefix_statistics = prefix_stats
                 assert self._softmax_logit_layer.sense_code_prefix_statistics is not None, f"something went wrong: {self._softmax_logit_layer.__dict__}"
                 print(f"sense code prefix stats has been set: {len(self._softmax_logit_layer.sense_code_prefix_statistics)}")
