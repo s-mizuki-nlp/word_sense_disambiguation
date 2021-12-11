@@ -5,6 +5,7 @@ saved_model/
 experiment_results/
 .data/
 copy_checkpoints_from_remote.sh
+_cache/
 
 # IDE
 .idea/
