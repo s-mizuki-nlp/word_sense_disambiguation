@@ -22,7 +22,21 @@ class HashCodeAwareLogits(BaseLogitAdjustableLayer):
                  num_hashes=2,
                  replace_trailing_zeroes: bool = False,
                  **kwargs):
+        """
+        Prefix-aware (=y_{<d}) logit layer implemented on top of Hash Embedings.
 
+        @param n_digits: number of digits of sense code.
+        @param n_ary_out: number of ary of sense code.
+        @param num_embeddings: vocabulary size of Hash Embeddings.
+        @param embedding_dim: number of hidden dimensions.
+        @param num_buckets: number of unique shared embeddings of Hash Embeddings algorithm.
+        @param additive: average along with prefixes (=sense hierarchy).
+        @param logit_adjustment: adjust logit score using prefix-aware prior probability
+        @param matrix_rank_reduction: apply rank reduction to logit coefficient matrix. it doesn't work well so far.
+        @param num_hashes:
+        @param replace_trailing_zeroes: replace prefix index of zeroes with last non-zero indices.
+        @param kwargs:
+        """
         if logit_adjustment:
             for required_argument in ("logit_adjust_tau", "logit_adjust_when"):
                 assert required_argument in kwargs, f"argument {required_argument} must be specified."
