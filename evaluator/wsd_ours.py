@@ -19,7 +19,8 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
 
     __AVAILABLE_METRICS = ("common_prefix_length","common_prefix_length_ratio",
                            "inclusion_probability", "synonym_probability",
-                           "perplexity", "perplexity_wo_zeroes")
+                           "perplexity", "perplexity_wo_zeroes",
+                           "cross_entropy_wo_zeroes")
 
     def __init__(self,
                  model: HierarchicalCodeEncoder,
@@ -81,7 +82,8 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
 
         return t_log_prob_inclusion
 
-    def calc_log_probability(self, predicted_code_probs: torch.Tensor, candidate_codes: torch.Tensor, ignore_zeroes: bool = False) -> torch.Tensor:
+    def calc_log_probability(self, predicted_code_probs: torch.Tensor, candidate_codes: torch.Tensor, ignore_zeroes: bool = False,
+                             average_by_code_length: bool = True) -> torch.Tensor:
         """
         calculate conditional log probability: \frac{1}{N_digits}\sum_{d in N_digits}{lnp(y_d|y_{<d}}
 
@@ -103,7 +105,10 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
             losses = F.cross_entropy(input=logits, target=targets, reduction="none")
             t_code_length_candidates = targets.shape[-1]
 
-        t_log_probability = - losses.sum(dim=-1) / t_code_length_candidates
+        if average_by_code_length:
+            t_log_probability = - losses.sum(dim=-1) / t_code_length_candidates
+        else:
+            t_log_probability = - losses.sum(dim=-1)
 
         return t_log_probability
 
@@ -130,11 +135,18 @@ class SenseCodeWSDTaskEvaluator(MostFrequentSenseWSDTaskEvaluator):
         elif self._inference_metric == "perplexity":
             t_scores = self.calc_log_probability(predicted_code_probs=predicted_code_probs,
                                                  candidate_codes=t_candidate_codes,
-                                                 ignore_zeroes=False)
+                                                 ignore_zeroes=False,
+                                                 average_by_code_length=True)
         elif self._inference_metric == "perplexity_wo_zeroes":
             t_scores = self.calc_log_probability(predicted_code_probs=predicted_code_probs,
                                                  candidate_codes=t_candidate_codes,
-                                                 ignore_zeroes=True)
+                                                 ignore_zeroes=True,
+                                                 average_by_code_length=True)
+        elif self._inference_metric == "cross_entropy_wo_zeroes":
+            t_scores = self.calc_log_probability(predicted_code_probs=predicted_code_probs,
+                                                 candidate_codes=t_candidate_codes,
+                                                 ignore_zeroes=True,
+                                                 average_by_code_length=False)
 
         return tensor_to_numpy(t_scores).tolist()
 
