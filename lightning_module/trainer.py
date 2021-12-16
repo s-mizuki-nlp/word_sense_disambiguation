@@ -161,6 +161,10 @@ class SenseCodeTrainer(LightningModule):
                             setattr(model._encoder, "_pos_index", {"n":0, "v":0})
                             setattr(model._encoder, "_embedding_code_boc", p_emb_code_)
             elif model._encoder.__class__.__name__ == "TransformerEncoder":
+                # 567af78
+                if not hasattr(model._encoder, "_sequence_direction"):
+                    setattr(model._encoder, "_sequence_direction", "left_to_right")
+
                 logit_layer = model._encoder._softmax_logit_layer
                 if isinstance(logit_layer, BaseLogitAdjustableLayer):
                     # 23a12b7
