@@ -318,6 +318,7 @@ class TransformerEncoder(BaseEncoder):
                  n_head: int,
                  pos_index: Dict[str, int],
                  softmax_logit_layer: nn.Module,
+                 sequence_direction: str = "left_to_right",
                  memory_encoder_input_feature: str = "entity",
                  layer_normalization: bool = False,
                  norm_digit_embeddings: bool = False,
@@ -330,6 +331,9 @@ class TransformerEncoder(BaseEncoder):
                  **kwargs):
 
         super().__init__(n_ary=n_ary)
+
+        AVAILABLE_VALUES = ("left_to_right", "both", "right_to_left")
+        assert sequence_direction not in AVAILABLE_VALUES, f"invalid `sequence_direction` value: {AVAILABLE_VALUES}"
 
         if kwargs.get("teacher_forcing", False):
             warnings.warn(f"`teacher_forcing=True` is invalid for TransformerEncoder module.")
@@ -357,6 +361,7 @@ class TransformerEncoder(BaseEncoder):
         self._batch_first = batch_first
         self._prob_zero_monotone_increasing = prob_zero_monotone_increasing
         self._embedding_layer_type = embedding_layer_type
+        self._sequence_direction = sequence_direction
 
         self._kwargs = kwargs
 
@@ -433,24 +438,54 @@ class TransformerEncoder(BaseEncoder):
 
     def create_sequence_inputs(self, lst_pos: List[str], device,
                                ground_truth_synset_codes: Optional[Union[List[List[int]], torch.Tensor]] = None,
-                               trim: bool = True) -> torch.Tensor:
-        # 1. prepend PoS index
-        # t_boc: (n_batch, 1)
-        lst_pos_idx = [self._pos_index[pos] for pos in lst_pos]
-        t_boc = torch.LongTensor(lst_pos_idx, device="cpu").unsqueeze(dim=-1).to(device)
+                               trim: bool = True,
+                               mask_index: int = 0) -> torch.Tensor:
 
         if ground_truth_synset_codes is None:
-            return t_boc
-
-        # 2. concat with one-shifted ground-truth codes.
-        # ground_truth_synset_codes: (n_batch, <=n_digits)
-        if isinstance(ground_truth_synset_codes, list):
+            n_batch = len(lst_pos)
+            n_synset_code_len = 0
+        elif isinstance(ground_truth_synset_codes, list):
+            n_batch = len(ground_truth_synset_codes)
+            n_synset_code_len = len(ground_truth_synset_codes[0])
             ground_truth_synset_codes = torch.LongTensor(ground_truth_synset_codes, device="cpu").to(device)
-        # t_inputs: (n_batch, <n_digits)
-        t_inputs = torch.cat((t_boc, ground_truth_synset_codes), dim=-1)
-        if trim:
+        else:
+            n_batch = ground_truth_synset_codes[0]
+            n_synset_code_len = ground_truth_synset_codes.shape[-1]
+        n_seq_len = min(self._n_digits, n_synset_code_len + 1)
+
+        if self._sequence_direction == "both":
+            t_inputs = torch.full(size=(n_batch, n_seq_len), fill_value=mask_index, device="cpu", dtype=torch.long).to(device)
+
+        elif self._sequence_direction == "left_to_right":
+            # 1. prepend PoS index
+            # t_boc: (n_batch, 1)
+            lst_pos_idx = [self._pos_index[pos] for pos in lst_pos]
+            t_boc = torch.LongTensor(lst_pos_idx, device="cpu").unsqueeze(dim=-1).to(device)
+
+            if ground_truth_synset_codes is None:
+                return t_boc
+
+            # 2. concat with right-shifted ground-truth codes.
+            # e.g. ground_truth = [1,2,3,4,0,0]; t_inputs = [idx(pos),1,2,3,4,0]
+            # ground_truth_synset_codes: (n_batch, <=n_digits)
+            # t_inputs: (n_batch, <n_digits)
+            t_inputs = torch.cat((t_boc, ground_truth_synset_codes), dim=-1)
             # trim the input sequence so that it would not exceed the number of digits.
-            t_inputs = t_inputs[:,:self._n_digits]
+            if trim:
+                t_inputs = t_inputs[:,:self._n_digits]
+
+        elif self._sequence_direction == "right_to_left":
+            # 1. prepare to-be-appended
+            t_eoc = torch.full(size=(n_batch, 1), fill_value=mask_index, device="cpu", dtype=torch.long).to(device)
+
+            if ground_truth_synset_codes is None:
+                return t_eoc
+
+            # left-shifted ground-truth codes.
+            # e.g. ground_truth = [1,2,3,4,0,0]; t_inputs = [2,3,4,0,0,0]
+            # ground_truth_synset_codes: (n_batch, <=n_digits)
+            t_inputs = torch.cat((ground_truth_synset_codes[:,1:], t_eoc), dim=-1)
+
         return t_inputs
 
     def setup_sense_code_prefix_index(self, synset_dataset: SynsetDataset):
@@ -499,13 +534,17 @@ class TransformerEncoder(BaseEncoder):
                 print(f"`logit_adjustment` is configured as False. do nothing.")
 
     @staticmethod
-    def generate_square_subsequent_mask(sz: int) -> torch.Tensor:
+    def generate_square_subsequent_mask(sz: int, left_to_right: bool) -> torch.Tensor:
         r"""
         Generate a square mask for the sequence. The masked positions are filled with float('-inf').
         Unmasked positions are filled with float(0.0).
         ref: https://pytorch.org/docs/1.10.0/generated/torch.nn.Transformer.html
         """
-        return torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
+        if left_to_right:
+            mask_tensor = torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
+        else:
+            mask_tensor = torch.tril(torch.full((sz, sz), float("-inf")), diagonal=-1)
+        return mask_tensor
 
     def _extract_entity_embeddings_from_context_embeddings(self,
                                     context_embeddings: torch.Tensor,
@@ -558,7 +597,6 @@ class TransformerEncoder(BaseEncoder):
     def forward_base(self, input_sequence: torch.Tensor,
                      entity_embeddings: torch.Tensor,
                      entity_sequence_mask: torch.Tensor,
-                     apply_autoregressive_mask: bool,
                      context_embeddings: Optional[torch.Tensor] = None,
                      context_sequence_mask: Optional[torch.Tensor] = None,
                      subword_spans: List[List[List[int]]] = None,
@@ -573,6 +611,7 @@ class TransformerEncoder(BaseEncoder):
         @return:
         """
 
+        _, device = self._dtype_and_device(input_sequence)
         n_digits = min(self._n_digits, input_sequence.shape[-1])
 
         # compute target embeddings: (n_batch, n_digits, n_dim_emb)
@@ -588,10 +627,11 @@ class TransformerEncoder(BaseEncoder):
         memory_key_padding_mask = entity_sequence_mask
 
         # prepare subsequent masks: (n_digits, n_digits)
-        if apply_autoregressive_mask:
-            _, device = self._dtype_and_device(input_sequence)
-            tgt_mask = self.generate_square_subsequent_mask(sz=n_digits).to(device)
-        else:
+        if self._sequence_direction == "left_to_right":
+            tgt_mask = self.generate_square_subsequent_mask(sz=n_digits, left_to_right=True).to(device)
+        elif self._sequence_direction == "right_to_left":
+            tgt_mask = self.generate_square_subsequent_mask(sz=n_digits, left_to_right=False).to(device)
+        elif self._sequence_direction == "both":
             tgt_mask = None
 
         # compute decoding
@@ -632,34 +672,55 @@ class TransformerEncoder(BaseEncoder):
         # return: t_codes: (n_batch, n_digits). t_codes[n,d] = argmax_{a}{Pr(Y=a|\hat{y_{<d}})} = \hat{y_{d}}
 
         dtype, device = self._dtype_and_device(entity_embeddings)
+        n_batch = len(pos)
 
-        for digit in range(self._n_digits):
-            if digit == 0:
-                input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=None)
-            else:
-                input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=t_codes)
+        if self._sequence_direction == "both":
+            dummy_inputs = torch.zeros((n_batch, self._n_digits), device=device, dtype=torch.long)
+            input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=dummy_inputs)
+            _, t_code_probs = self.forward_base(input_sequence=input_sequence,
+                                                entity_embeddings=entity_embeddings,
+                                                entity_sequence_mask=entity_sequence_mask,
+                                                context_embeddings=context_embeddings,
+                                                context_sequence_mask=context_sequence_mask,
+                                                subword_spans=subword_spans,
+                                                **kwargs)
+            t_codes = t_code_probs.argmax(dim=-1)
 
-            # t_code_probs_upto_d: (n_batch, digit+1, n_ary)
-            _, t_code_probs_upto_d = self.forward_base(input_sequence=input_sequence,
-                                                       entity_embeddings=entity_embeddings,
-                                                       entity_sequence_mask=entity_sequence_mask,
-                                                       context_embeddings=context_embeddings,
-                                                       context_sequence_mask=context_sequence_mask,
-                                                       subword_spans=subword_spans,
-                                                       apply_autoregressive_mask=True,
-                                                       **kwargs)
+        else:
+            for digit in range(self._n_digits):
+                if digit == 0:
+                    input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=None)
+                else:
+                    input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=t_codes)
 
-            # t_code_probs_d: (n_batch, 1, n_ary)
-            t_code_probs_d = t_code_probs_upto_d[:, digit, :].unsqueeze(1)
-            # t_codes_d: (n_batch, 1)
-            t_codes_d = t_code_probs_d.argmax(dim=-1)
+                # t_code_probs_upto_d: (n_batch, digit+1, n_ary)
+                _, t_code_probs_upto_d = self.forward_base(input_sequence=input_sequence,
+                                                           entity_embeddings=entity_embeddings,
+                                                           entity_sequence_mask=entity_sequence_mask,
+                                                           context_embeddings=context_embeddings,
+                                                           context_sequence_mask=context_sequence_mask,
+                                                           subword_spans=subword_spans,
+                                                           **kwargs)
 
-            # concat with previous sequences
-            if digit == 0:
-                t_codes, t_code_probs = t_codes_d, t_code_probs_d
-            else:
-                t_codes = torch.cat([t_codes, t_codes_d], dim=-1)
-                t_code_probs = torch.cat([t_code_probs, t_code_probs_d], dim=1)
+                if self._sequence_direction == "left_to_right":
+                    target_digit = digit
+                elif self._sequence_direction == "right_to_left":
+                    target_digit = 0
+                # t_code_probs_d: (n_batch, 1, n_ary)
+                t_code_probs_d = t_code_probs_upto_d[:, target_digit, :].unsqueeze(1)
+                # t_codes_d: (n_batch, 1)
+                t_codes_d = t_code_probs_d.argmax(dim=-1)
+
+                # concat with previous sequences
+                if digit == 0:
+                    t_codes, t_code_probs = t_codes_d, t_code_probs_d
+                else:
+                    if self._sequence_direction == "left_to_right":
+                        t_codes = torch.cat([t_codes, t_codes_d], dim=-1)
+                        t_code_probs = torch.cat([t_code_probs, t_code_probs_d], dim=1)
+                    elif self._sequence_direction == "right_to_left":
+                        t_codes = torch.cat([t_codes_d, t_codes], dim=-1)
+                        t_code_probs = torch.cat([t_code_probs_d, t_code_probs], dim=1)
 
         return t_codes, t_code_probs
 
@@ -698,7 +759,6 @@ class TransformerEncoder(BaseEncoder):
                                      context_embeddings=context_embeddings,
                                      context_sequence_mask=context_sequence_mask,
                                      subword_spans=subword_spans,
-                                     apply_autoregressive_mask=True,
                                      **kwargs)
 
     @property
