@@ -441,17 +441,15 @@ class TransformerEncoder(BaseEncoder):
                                trim: bool = True,
                                mask_index: int = 0) -> torch.Tensor:
 
+        n_batch = len(lst_pos)
         if ground_truth_synset_codes is None:
-            n_batch = len(lst_pos)
-            n_synset_code_len = 0
+            n_sense_code_digits = 0
         elif isinstance(ground_truth_synset_codes, list):
-            n_batch = len(ground_truth_synset_codes)
-            n_synset_code_len = len(ground_truth_synset_codes[0])
             ground_truth_synset_codes = torch.LongTensor(ground_truth_synset_codes, device="cpu").to(device)
+            n_sense_code_digits = ground_truth_synset_codes.shape[-1]
         else:
-            n_batch = ground_truth_synset_codes[0]
-            n_synset_code_len = ground_truth_synset_codes.shape[-1]
-        n_seq_len = min(self._n_digits, n_synset_code_len + 1)
+            n_sense_code_digits = ground_truth_synset_codes.shape[-1]
+        n_seq_len = min(self._n_digits, n_sense_code_digits + 1)
 
         if self._sequence_direction == "both":
             t_inputs = torch.full(size=(n_batch, n_seq_len), fill_value=mask_index, device="cpu", dtype=torch.long).to(device)
