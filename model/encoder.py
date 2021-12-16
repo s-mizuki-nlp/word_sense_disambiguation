@@ -333,7 +333,7 @@ class TransformerEncoder(BaseEncoder):
         super().__init__(n_ary=n_ary)
 
         AVAILABLE_VALUES = ("left_to_right", "both", "right_to_left")
-        assert sequence_direction not in AVAILABLE_VALUES, f"invalid `sequence_direction` value: {AVAILABLE_VALUES}"
+        assert sequence_direction in AVAILABLE_VALUES, f"invalid `sequence_direction` value: {AVAILABLE_VALUES}"
 
         if kwargs.get("teacher_forcing", False):
             warnings.warn(f"`teacher_forcing=True` is invalid for TransformerEncoder module.")
@@ -802,6 +802,7 @@ class TransformerEncoder(BaseEncoder):
             "class_name": self.__class__.__name__,
             "n_dim_hidden": self._n_dim_hidden,
             "n_head": self._n_head,
+            "sequence_direction": self._sequence_direction,
             "num_decoder_layers": self._num_decoder_layers,
             "num_encoder_layers": self._num_encoder_layers,
             "memory_encoder_input_feature": self._memory_encoder_input_feature,
