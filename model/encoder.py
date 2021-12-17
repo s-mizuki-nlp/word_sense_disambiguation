@@ -341,7 +341,11 @@ class TransformerEncoder(BaseEncoder):
             if memory_encoder_input_feature not in set_features:
                 raise ValueError(f"`memory_encoder_input_feature` must be: {set_features}")
         else:
+            warnings.warn(f"`memory_encoder_input_feature` is ignored because there is no encoder layer.")
             memory_encoder_input_feature = None
+
+        if concat_context_into_decoder_input and (num_encoder_layers > 0):
+            warnings.warn(f"you should set `num_encoder_layers=0` because context is fed into decoder directly.")
 
         self._n_dim_hidden = n_dim_emb
         self._n_digits = n_digits
