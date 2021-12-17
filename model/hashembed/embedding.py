@@ -325,3 +325,9 @@ class HashEmbedding(nn.Module):
             # concateates the vector with the weights
             word_embedding = torch.cat([word_embedding, importance_weight.squeeze(-2)], dim=-1)
         return word_embedding
+
+    def summary(self):
+        ret = {}
+        for attr_name in ("num_embeddings", "num_hashes", "num_buckets", "append_weight", "padding_idx"):
+            ret[attr_name] = getattr(self, attr_name)
+        return ret

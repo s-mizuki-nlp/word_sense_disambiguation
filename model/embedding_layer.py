@@ -38,6 +38,12 @@ class HashCodeAwareEmbedding(BasePrefixAwareLayer):
 
         return t_emb
 
+    def summary(self):
+        ret = super().summary()
+        ret.update(self.emb_layer.summary())
+        ret["n_seq_len"] = self.n_seq_len
+        return ret
+
 
 class PositionAwareEmbedding(torch.nn.Module):
 
@@ -67,3 +73,9 @@ class PositionAwareEmbedding(torch.nn.Module):
         else:
             t_emb = self.emb_layers.forward(x)
         return t_emb
+
+    def summary(self):
+        ret = {
+            "n_seq_len": self.n_seq_len
+        }
+        return ret
