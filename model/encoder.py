@@ -320,6 +320,7 @@ class TransformerEncoder(BaseEncoder):
                  softmax_logit_layer: nn.Module,
                  embed_layer: nn.Module,
                  sequence_direction: str = "left_to_right",
+                 concat_context_into_decoder_input: bool = False,
                  memory_encoder_input_feature: str = "entity",
                  layer_normalization: bool = False,
                  trainable_positional_encoding: bool = False,
@@ -358,6 +359,7 @@ class TransformerEncoder(BaseEncoder):
         self._batch_first = batch_first
         self._prob_zero_monotone_increasing = prob_zero_monotone_increasing
         self._sequence_direction = sequence_direction
+        self._concat_context_into_decoder_input = concat_context_into_decoder_input
 
         self._kwargs = kwargs
 
@@ -590,7 +592,8 @@ class TransformerEncoder(BaseEncoder):
         @param input_sequence: (n_batch, <=n_digits). sequence of the input codes.
         @param entity_embeddings: (n_batch, max(entity_span), n_emb). stack of the subword embeddings within entity span.
         @param entity_sequence_mask: (n_batch, max(entity_span)). mask of the entity embeddings.
-        @param apply_autoregressive_mask: autoregressive (=left-to-right) prediction (True) or not (False)
+        @param context_embeddings: embeddings of whole-sentence subwords. (n_batch, max(n_seq_len), n_dim)
+        @param context_sequence_mask: context mask. (n_batch, max(n_seq_len))
         @param kwargs:
         @return:
         """
@@ -624,6 +627,15 @@ class TransformerEncoder(BaseEncoder):
         elif self._sequence_direction == "both_inputless":
             tgt_mask = None
 
+        # (optional) concat context embeddings into target sequence.
+        if self._concat_context_into_decoder_input:
+            # tgt: (n_batch, n_digits + max(n_seq_len), n_dim)
+            tgt = torch.cat((tgt, context_embeddings), dim=1)
+            # tgt_mask: (n_digits + max(n_seq_len), n_digits + max(n_seq_len))
+            n_seq_len_ = tgt.shape[1]
+            tgt_mask_ = torch.zeros(size=(n_seq_len_, n_seq_len_), dtype=torch.float, device=device)
+            tgt_mask_[:n_digits, :n_digits] = tgt_mask
+            tgt_mask = tgt_mask_
 
         # compute decoding
         if self._batch_first:
@@ -632,6 +644,9 @@ class TransformerEncoder(BaseEncoder):
         h_out = self._decoder.forward(tgt=tgt, tgt_mask=tgt_mask, memory=memory, memory_key_padding_mask=memory_key_padding_mask)
         if self._batch_first:
             h_out = h_out.swapaxes(0, 1)
+        if self._concat_context_into_decoder_input:
+            # h_out: (n_batch, n_digits, n_dim)
+            h_out = h_out[:,:n_digits,:]
 
         # compute Pr{Y_d|y_{<d}}
         # t_code_probs: (n_batch, n_digits, n_ary)
