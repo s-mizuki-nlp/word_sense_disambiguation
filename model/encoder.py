@@ -318,16 +318,14 @@ class TransformerEncoder(BaseEncoder):
                  n_head: int,
                  pos_index: Dict[str, int],
                  softmax_logit_layer: nn.Module,
+                 embed_layer: nn.Module,
                  sequence_direction: str = "left_to_right",
                  memory_encoder_input_feature: str = "entity",
                  layer_normalization: bool = False,
-                 norm_digit_embeddings: bool = False,
-                 ignore_trailing_zero_digits: bool = False,
                  trainable_positional_encoding: bool = False,
                  dropout: float = 0.1,
                  batch_first: bool = True,
                  prob_zero_monotone_increasing: bool = False,
-                 embedding_layer_type: str = "default",
                  **kwargs):
 
         super().__init__(n_ary=n_ary)
@@ -347,6 +345,7 @@ class TransformerEncoder(BaseEncoder):
         self._n_dim_hidden = n_dim_emb
         self._n_digits = n_digits
         self._softmax_logit_layer = softmax_logit_layer
+        self._emb_layer = embed_layer
         # self._n_ary = n_ary
         self._pos_index = pos_index
         self._num_encoder_layers = num_encoder_layers
@@ -355,12 +354,9 @@ class TransformerEncoder(BaseEncoder):
         self._n_head = n_head
         self._layer_normalization = layer_normalization
         self._dropout = dropout
-        self._norm_digit_embeddings = norm_digit_embeddings
-        self._ignore_trailing_zero_digits = ignore_trailing_zero_digits
         self._trainable_positional_encoding = trainable_positional_encoding
         self._batch_first = batch_first
         self._prob_zero_monotone_increasing = prob_zero_monotone_increasing
-        self._embedding_layer_type = embedding_layer_type
         self._sequence_direction = sequence_direction
 
         self._kwargs = kwargs
@@ -368,29 +364,6 @@ class TransformerEncoder(BaseEncoder):
         self._build()
 
     def _build(self):
-
-        # digit embeddings
-        cfg_emb_layer = {
-            "embedding_dim":self._n_dim_hidden,
-            "max_norm":1.0 if self._norm_digit_embeddings else None,
-            "padding_idx":0 if self._ignore_trailing_zero_digits else None,
-            "num_embeddings": self._n_ary + len(self._pos_index) # n_pos will be used for beginning-of-sense-code symbol.
-        }
-        if self._embedding_layer_type == "default":
-            self._emb_layer = PositionAwareEmbedding(n_seq_len=None, **cfg_emb_layer)
-        elif self._embedding_layer_type == "position_aware":
-            self._emb_layer = PositionAwareEmbedding(n_seq_len=self._n_digits, **cfg_emb_layer)
-        elif self._embedding_layer_type == "hash":
-            self._emb_layer = HashCodeAwareEmbedding(n_seq_len=self._n_digits,
-                                                     num_buckets=self._kwargs.get("num_buckets", 10000),
-                                                     num_embeddings=self._n_synset_code_prefix+1,
-                                                     num_hashes=self._kwargs.get("num_hashes", 2),
-                                                     embedding_dim=self._n_dim_hidden,
-                                                     append_weight=True,
-                                                     replace_trailing_zeroes=False # False = fill with zeroes
-                                                     )
-        else:
-            raise AssertionError(f"unknown `embedding_layer_type` value: {self._embedding_layer_type}")
 
         # positional encodings
         cfg_pe_layer = {
@@ -825,9 +798,11 @@ class TransformerEncoder(BaseEncoder):
             "memory_encoder_input_feature": self._memory_encoder_input_feature,
             "pos_index": self._pos_index,
             "layer_normalization": self._layer_normalization,
-            "embedding_layer_type": self._embedding_layer_type,
+            "embedding_layer_class": self._emb_layer.__class__.__name__,
             "logit_layer_class": self._softmax_logit_layer.__class__.__name__
         }
         if hasattr(self._softmax_logit_layer, "summary"):
             ret["logit_layer"] = self._softmax_logit_layer.summary()
+        if hasattr(self._emb_layer, "summary"):
+            ret["embed_layer"] = self._emb_layer.summary()
         return ret
