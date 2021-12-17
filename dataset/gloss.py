@@ -3,6 +3,7 @@
 
 from typing import Union, List, Optional, Callable, Iterable, Dict, Any
 import warnings
+from pprint import pprint
 
 import os, sys, io
 import bs4.element
@@ -22,8 +23,7 @@ class WordNetGlossDataset(Dataset):
                  description: str = "",
                  verbose: bool = False):
 
-        super().__init__(path=lst_path_gloss_corpus, transform_functions=transform_functions,
-                         filter_function=filter_function, n_rows=None, description=description)
+        super().__init__()
 
         if isinstance(lst_path_gloss_corpus, str):
             lst_path_gloss_corpus = [lst_path_gloss_corpus]
@@ -93,7 +93,13 @@ class WordNetGlossDataset(Dataset):
                     "surface": term,
                     "words": term.split(" "),
                 }
+                # lemmaとtermの違いは，wordnet.lemmas(...)用にformatされているか否か
                 assert lemma.name().split("%")[0] == term.replace(" ","_")
+                try:
+                    _ = wn.lemma_from_key(dict_lemma["lemma_key"])
+                except Exception as e:
+                    warnings.warn(f"invalid lemma key: {e}")
+                    continue
                 lst_lemmas.append(dict_lemma)
 
             # extract definition sentence
@@ -108,20 +114,50 @@ class WordNetGlossDataset(Dataset):
             # parse example nodes
             lst_example_sentences = []
             for example_node in synset_node.select("ex"):
-                if len(example_node.select("id")) == 0:
-                    print(f"skip non-annotated example: {synset_id}|{example_node.get('id')}")
+                if len(example_node.select("wf id")) == 0:
+                    if self._verbose:
+                        print(f"skip non-annotated example: {synset_id}|{example_node.get('id')}")
                     continue
                 obj_sentence = self._parse_example_node_into_annotated_sentence(pos=pos, synset_id=synset_id,
                                                                                 lst_lemmas=lst_lemmas,
                                                                                 example_node=example_node)
                 if len(obj_sentence["entities"]) == 0:
-                    print(f"skip non-annotated example: {synset_id}|{example_node.get('id')}")
+                    if self._verbose:
+                        print(f"skip non-annotated example: {synset_id}|{example_node.get('id')}")
+                    continue
                 lst_example_sentences.append(obj_sentence)
 
             lst_annotated_sentences = lst_def_sentences + lst_example_sentences
 
             for obj_annotated_sentence in lst_annotated_sentences:
-                yield obj_annotated_sentence
+                # self.validate_annotated_sentence(obj_annotated_sentence)
+                # yield obj_annotated_sentence
+                yield obj_annotated_sentence, synset_node
+
+    def validate_annotated_sentence(self, obj_annotated_sentence: Dict[str, Any]):
+        assert len(obj_annotated_sentence["entities"]) > 0, f"found non-annotated sentence: {obj_annotated_sentence}"
+
+        # validate word sequence
+        expected = obj_annotated_sentence["tokenized_sentence"]
+        actual = " ".join(obj_annotated_sentence["words"])
+        assert expected == actual, \
+            f"wrong word sequence?\nexpected: {expected}\nactual: {actual}"
+
+        lst_words = obj_annotated_sentence["words"]
+        lst_entities = obj_annotated_sentence["entities"]
+        for obj_entity in lst_entities:
+            # validate surface form
+            entity_span = lst_words[slice(*obj_entity["span"])]
+            expected = obj_entity["lemma"].lower()
+            actual = "_".join(entity_span).replace("-","_").lower()
+            if expected != actual:
+                if self._verbose:
+                    warnings.warn(f"wrong entity span? {expected} != {actual}")
+
+            # validate lemma key
+            expected = wn.lemma_from_key(obj_entity["ground_truth_lemma_keys"][0]).name().lower()
+            actual = obj_entity["lemma"].lower()
+            assert expected == actual, f"wrong lemma key: {expected} != {actual}"
 
     # extract surfaces from definition subtree
     def _parse_definition_node_to_surfaces(self, definition_node: bs4.element.Tag) -> List[Dict[str, str]]:
@@ -188,10 +224,12 @@ class WordNetGlossDataset(Dataset):
             if surface_node.name == "wf":
                 surface = utils_wordnet_gloss.clean_up_surface(surface_node.text)
             elif surface_node.name == "glob":
-                surface = utils_wordnet_gloss.lemma_to_surface(surface_node.get("lemma"))
+                # surface = utils_wordnet_gloss.lemma_to_surface(surface_node.get("lemma"))
+                surface = surface_node.select_one("id").get("lemma")
             else:
                 raise ValueError(f"unexpected surface node: {surface_node}")
 
+            # warning: surface may be Multi-Word Expression.
             dict_surface = {
                 "surface": surface,
                 "lemma": utils_wordnet_gloss.clean_up_lemma(surface_node.get("lemma")),
@@ -206,13 +244,15 @@ class WordNetGlossDataset(Dataset):
             if id_node is not None:
                 lemma_key = id_node.get("sk")
                 if lemma_key in possible_lemma_keys:
+                    lemma = wn.lemma_from_key(lemma_key).name()
                     entity = {
-                        "lemma": dict_surface["lemma"],
+                        "lemma": lemma,
                         "ground_truth_lemma_keys": [lemma_key],
                         "ground_truth_synset_ids": [synset_id],
                         "pos": pos,
                         "span": [len(lst_words), len(lst_words) + len(surface_words)]
                     }
+                    dict_surface["lemma"] = lemma # overwrite lemma from the lemma_key lookup result.
                     dict_surface["pos"] = pos
                     lst_entities.append(entity)
                 else:
@@ -227,6 +267,8 @@ class WordNetGlossDataset(Dataset):
         if len(lst_entities) == 0:
             if self._verbose:
                 warnings.warn(f"no entity has found: {example_node}")
+                # DEBUG
+                print(example_node)
 
         dict_sentence = {
             "type": "example",
