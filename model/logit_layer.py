@@ -250,3 +250,4 @@ class PositionAwareLogits(torch.nn.Module):
         ret = {
             "n_seq_len": self.n_seq_len
         }
+        return ret
