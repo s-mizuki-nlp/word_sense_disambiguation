@@ -14,6 +14,8 @@ DIR_EVALSET = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Evaluat
 DIR_EVALSET_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Evaluation_Framework/bert_embeddings/"
 DIR_TRAINSET = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Training_Corpora/"
 DIR_TRAINSET_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Training_Corpora/bert_embeddings/"
+DIR_WORDNET_GLOSS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_corpus/"
+DIR_WORDNET_GLOSS_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_corpus/bert_embeddings/"
 
 # evaluation dataset for all-words WSD task
 cfg_evaluation = {
@@ -46,6 +48,7 @@ cfg_evaluation = {
     }
 }
 
+
 cfg_training = {
     "SemCor": {
         "path_corpus": os.path.join(DIR_TRAINSET, "SemCor/semcor.data.xml"),
@@ -67,5 +70,12 @@ cfg_training = {
         "padding": False,
         "max_sequence_length": None,
         "description": "WSD SemCor corpora (excluding no-sense-annotated sentences) encoded by BERT-large-cased."
+    },
+    "WordNet-Gloss-noun-verb": {
+        "lst_path_gloss_corpus": [
+            os.path.join(DIR_WORDNET_GLOSS, "WordNet-3.0/glosstag/merged/noun.xml"),
+            os.path.join(DIR_WORDNET_GLOSS, "WordNet-3.0/glosstag/merged/verb.xml")
+        ],
+        "description": "Automatically annotated WordNet Gloss corpus for noun and verb."
     }
 }
