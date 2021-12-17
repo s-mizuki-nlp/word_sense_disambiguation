@@ -332,7 +332,7 @@ class TransformerEncoder(BaseEncoder):
 
         super().__init__(n_ary=n_ary)
 
-        AVAILABLE_VALUES = ("left_to_right", "both", "right_to_left")
+        AVAILABLE_VALUES = ("left_to_right", "both", "both_inputless", "right_to_left")
         assert sequence_direction in AVAILABLE_VALUES, f"invalid `sequence_direction` value: {AVAILABLE_VALUES}"
 
         if kwargs.get("teacher_forcing", False):
@@ -452,6 +452,9 @@ class TransformerEncoder(BaseEncoder):
         n_seq_len = min(self._n_digits, n_sense_code_digits + 1)
 
         if self._sequence_direction == "both":
+            t_inputs = ground_truth_synset_codes
+
+        if self._sequence_direction == "both_inputless":
             t_inputs = torch.full(size=(n_batch, n_seq_len), fill_value=mask_index, device="cpu", dtype=torch.long).to(device)
 
         elif self._sequence_direction == "left_to_right":
@@ -534,7 +537,7 @@ class TransformerEncoder(BaseEncoder):
     @staticmethod
     def generate_square_subsequent_mask(sz: int, left_to_right: bool) -> torch.Tensor:
         r"""
-        Generate a square mask for the sequence. The masked positions are filled with float('-inf').
+        Generate a square mask for the subsequent or preceding sequence. The masked positions are filled with float('-inf').
         Unmasked positions are filled with float(0.0).
         ref: https://pytorch.org/docs/1.10.0/generated/torch.nn.Transformer.html
         """
@@ -542,6 +545,16 @@ class TransformerEncoder(BaseEncoder):
             mask_tensor = torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
         else:
             mask_tensor = torch.tril(torch.full((sz, sz), float("-inf")), diagonal=-1)
+        return mask_tensor
+
+    @staticmethod
+    def generate_square_diagonal_mask(sz: int) -> torch.Tensor:
+        r"""
+        Generate a square mask for the itself (=diagonal elements). The masked positions are filled with float('-inf').
+        Unmasked positions are filled with float(0.0).
+        ref: https://pytorch.org/docs/1.10.0/generated/torch.nn.Transformer.html
+        """
+        mask_tensor = torch.zeros(size=(sz, sz), dtype=torch.float).fill_diagonal_(float("-inf"))
         return mask_tensor
 
     def _extract_entity_embeddings_from_context_embeddings(self,
@@ -630,7 +643,13 @@ class TransformerEncoder(BaseEncoder):
         elif self._sequence_direction == "right_to_left":
             tgt_mask = self.generate_square_subsequent_mask(sz=n_digits, left_to_right=False).to(device)
         elif self._sequence_direction == "both":
+            if self.training:
+                tgt_mask = self.generate_square_diagonal_mask(sz=n_digits).to(device)
+            else:
+                tgt_mask = None
+        elif self._sequence_direction == "both_inputless":
             tgt_mask = None
+
 
         # compute decoding
         if self._batch_first:
@@ -672,7 +691,7 @@ class TransformerEncoder(BaseEncoder):
         dtype, device = self._dtype_and_device(entity_embeddings)
         n_batch = len(pos)
 
-        if self._sequence_direction == "both":
+        if self._sequence_direction in ("both", "both_inputless"):
             dummy_inputs = torch.zeros((n_batch, self._n_digits), device=device, dtype=torch.long)
             input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=dummy_inputs)
             _, t_code_probs = self.forward_base(input_sequence=input_sequence,
