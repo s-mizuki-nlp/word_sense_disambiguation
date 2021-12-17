@@ -616,10 +616,11 @@ class TransformerEncoder(BaseEncoder):
         elif self._sequence_direction == "right_to_left":
             tgt_mask = self.generate_square_subsequent_mask(sz=n_digits, left_to_right=False).to(device)
         elif self._sequence_direction == "both":
-            if self.training:
-                tgt_mask = self.generate_square_diagonal_mask(sz=n_digits).to(device)
-            else:
-                tgt_mask = None
+            # if self.training:
+            #     tgt_mask = self.generate_square_diagonal_mask(sz=n_digits).to(device)
+            # else:
+            #     tgt_mask = None
+            tgt_mask = self.generate_square_diagonal_mask(sz=n_digits).to(device)
         elif self._sequence_direction == "both_inputless":
             tgt_mask = None
 
