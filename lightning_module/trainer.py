@@ -164,6 +164,9 @@ class SenseCodeTrainer(LightningModule):
                 # 567af78
                 if not hasattr(model._encoder, "_sequence_direction"):
                     setattr(model._encoder, "_sequence_direction", "left_to_right")
+                # 3c211f1
+                if not hasattr(model._encoder, "_concat_context_into_decoder_input"):
+                    setattr(model._encoder, "_concat_context_into_decoder_input", False)
 
                 logit_layer = model._encoder._softmax_logit_layer
                 if isinstance(logit_layer, BaseLogitAdjustableLayer):
