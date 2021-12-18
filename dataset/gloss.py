@@ -1,25 +1,23 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
-
 from typing import Union, List, Optional, Callable, Iterable, Dict, Any
+import copy, pickle
 import warnings
-from pprint import pprint
 
 import os, sys, io
 import bs4.element
 from bs4 import BeautifulSoup
 from nltk.corpus import wordnet as wn
+import Levenshtein
 
-from ._base import AbstractFormatDataset
 from torch.utils.data import Dataset
 from dataset_preprocessor import utils_wordnet, utils_wordnet_gloss
 
 class WordNetGlossDataset(Dataset):
 
     def __init__(self, lst_path_gloss_corpus: Union[str, List[str]],
-                 transform_functions = None,
+                 concat_hypernym_definition_sentence: bool = False,
                  filter_function: Optional[Union[Callable, List[Callable]]] = None,
-                 entity_filter_function: Optional[Union[Callable, List[Callable]]] = None,
                  description: str = "",
                  verbose: bool = False):
 
@@ -31,9 +29,9 @@ class WordNetGlossDataset(Dataset):
             assert os.path.exists(path), f"invalid path specified: {path}"
 
         self._lst_path_gloss_corpus = lst_path_gloss_corpus
+        self._concat_hypernym_definition_sentence = concat_hypernym_definition_sentence
 
         self._description = description
-        self._transform_functions = transform_functions
 
         if filter_function is None:
             self._filter_function = []
@@ -42,26 +40,30 @@ class WordNetGlossDataset(Dataset):
         elif not isinstance(filter_function, list):
             self._filter_function = [filter_function]
 
-        if entity_filter_function is None:
-            self._entity_filter_function = []
-        elif isinstance(entity_filter_function, list):
-            self._entity_filter_function = entity_filter_function
-        elif not isinstance(entity_filter_function, list):
-            self._entity_filter_function = [entity_filter_function]
-
         self._verbose = verbose
 
-    def __iter__(self):
-        if isinstance(self._transform_functions, dict):
-            for field_name, function in self._transform_functions.items():
-                if hasattr(function, "reset"):
-                    function.reset()
+        # preload sentence object
+        self._dataset = self._preload_dataset()
 
-        iter_records = self._annotated_sentence_loader()
-        n_read = 0
-        for record in iter_records:
+    def _preload_dataset(self):
+        print(f"loading dataset...")
+        lst_sentences = []
+        for obj_sentence in self._annotated_sentence_loader():
+            lst_sentences.append(obj_sentence)
+        print(f"loaded annotated sentences: {len(lst_sentences)}")
+
+        return lst_sentences
+
+    def __iter__(self):
+        for record in self._dataset:
+            flag = False
+            for filter_function in self._filter_function:
+                if filter_function(record):
+                    flag = True
+                    break
+            if flag:
+                continue
             yield record
-            n_read += 1
 
     def _synset_node_loader(self) -> Iterable[bs4.element.Tag]:
         for path in self._lst_path_gloss_corpus:
@@ -76,11 +78,36 @@ class WordNetGlossDataset(Dataset):
 
     def _annotated_sentence_loader(self):
 
+        dict_synset_definition = {}
+        if self._concat_hypernym_definition_sentence:
+            # preload definition sentence of all synsets.
+            for synset_node in self._synset_node_loader():
+                pos = synset_node.get("pos")
+                synset_offset = int(synset_node.get("ofs"))
+                synset = wn.synset_from_pos_and_offset(pos, synset_offset)
+                synset_id = synset.name()
+
+                # extract definition sentence
+                assert len(synset_node.select("def")) == 1, f"missing definition node: {synset_node}"
+                lst_def_surfaces = self._parse_definition_node_to_surfaces(definition_node=synset_node.select_one("def"))
+                dict_synset_definition[synset_id] = lst_def_surfaces
+
         for synset_node in self._synset_node_loader():
             pos = synset_node.get("pos")
             synset_offset = int(synset_node.get("ofs"))
             synset = wn.synset_from_pos_and_offset(pos, synset_offset)
             synset_id = synset.name()
+
+            # get hypernym definition sentence
+            if self._concat_hypernym_definition_sentence:
+                lst_hypernyms = wn.synset(synset_id).hypernyms()
+                if len(lst_hypernyms) > 0:
+                    hypernym_synset_id = lst_hypernyms[0].name()
+                    lst_hypernym_def_surfaces = dict_synset_definition[hypernym_synset_id]
+                else:
+                    lst_hypernym_def_surfaces = None
+            else:
+                lst_hypernym_def_surfaces = None
 
             # lemma information
             lst_lemmas = []
@@ -109,7 +136,8 @@ class WordNetGlossDataset(Dataset):
             # then concat lemmas into definition in order to create sense-annotated sentence.
             lst_def_sentences = self.render_lemmas_and_definition_into_annotated_sentences(pos=pos,
                                                                                            synset_id=synset_id, lst_lemmas=lst_lemmas,
-                                                                                           lst_def_surfaces=lst_def_surfaces)
+                                                                                           lst_def_surfaces=lst_def_surfaces,
+                                                                                           lst_hypernym_def_surfaces=lst_hypernym_def_surfaces)
 
             # parse example nodes
             lst_example_sentences = []
@@ -118,23 +146,26 @@ class WordNetGlossDataset(Dataset):
                     if self._verbose:
                         print(f"skip non-annotated example: {synset_id}|{example_node.get('id')}")
                     continue
-                obj_sentence = self._parse_example_node_into_annotated_sentence(pos=pos, synset_id=synset_id,
+                lst_obj_sentence = self._parse_example_node_into_annotated_sentence(pos=pos, synset_id=synset_id,
                                                                                 lst_lemmas=lst_lemmas,
-                                                                                example_node=example_node)
-                if len(obj_sentence["entities"]) == 0:
-                    if self._verbose:
-                        print(f"skip non-annotated example: {synset_id}|{example_node.get('id')}")
-                    continue
-                lst_example_sentences.append(obj_sentence)
+                                                                                example_node=example_node,
+                                                                                lst_hypernym_def_surfaces=lst_hypernym_def_surfaces)
+
+                for obj_sentence in lst_obj_sentence:
+                    if len(obj_sentence["entities"]) == 0:
+                        if self._verbose:
+                            print(f"skip non-annotated example: {synset_id}|{example_node.get('id')}")
+                        continue
+                    lst_example_sentences.append(obj_sentence)
 
             lst_annotated_sentences = lst_def_sentences + lst_example_sentences
 
             for obj_annotated_sentence in lst_annotated_sentences:
-                # self.validate_annotated_sentence(obj_annotated_sentence)
-                # yield obj_annotated_sentence
-                yield obj_annotated_sentence, synset_node
+                self.validate_annotated_sentence(obj_annotated_sentence, verbose=self._verbose)
+                yield obj_annotated_sentence
 
-    def validate_annotated_sentence(self, obj_annotated_sentence: Dict[str, Any]):
+    @staticmethod
+    def validate_annotated_sentence(obj_annotated_sentence: Dict[str, Any], verbose: bool = False):
         assert len(obj_annotated_sentence["entities"]) > 0, f"found non-annotated sentence: {obj_annotated_sentence}"
 
         # validate word sequence
@@ -151,7 +182,7 @@ class WordNetGlossDataset(Dataset):
             expected = obj_entity["lemma"].lower()
             actual = "_".join(entity_span).replace("-","_").lower()
             if expected != actual:
-                if self._verbose:
+                if verbose:
                     warnings.warn(f"wrong entity span? {expected} != {actual}")
 
             # validate lemma key
@@ -180,7 +211,8 @@ class WordNetGlossDataset(Dataset):
 
     def render_lemmas_and_definition_into_annotated_sentences(self, pos: str, synset_id: str,
                                                               lst_lemmas: List[Dict[str, Union[str, List[str]]]],
-                                                              lst_def_surfaces: List[Dict[str, str]]):
+                                                              lst_def_surfaces: List[Dict[str, str]],
+                                                              lst_hypernym_def_surfaces: Optional[List[Dict[str, str]]] = None):
         lst_sentences = []
         lst_def_words = [surface["surface"] for surface in lst_def_surfaces]
         for dict_lemma in lst_lemmas:
@@ -206,13 +238,24 @@ class WordNetGlossDataset(Dataset):
                 "entities": [entity],
                 "surfaces": [obj_surface] + lst_def_surfaces
             }
-
             lst_sentences.append(dict_sentence)
+
+            # (optional) hypernym definition sentenceを単純連結
+            if lst_hypernym_def_surfaces is not None:
+                dict_sentence_ = copy.deepcopy(dict_sentence)
+                dict_sentence_["type"] = "definition+hypernym.def"
+                dict_sentence_["words"] += [surface["surface"] for surface in lst_hypernym_def_surfaces]
+                dict_sentence_["tokenized_sentence"] = " ".join(dict_sentence_["words"])
+                dict_sentence_["surfaces"] += lst_hypernym_def_surfaces
+                lst_sentences.append(dict_sentence_)
+
         return lst_sentences
 
     # extract and annotate surfaces from example subtree
     def _parse_example_node_into_annotated_sentence(self, pos: str, synset_id: str, lst_lemmas: List[Dict[str, Union[str, List[str]]]],
-                                                    example_node: bs4.element.Tag) -> Dict[str, Any]:
+                                                    example_node: bs4.element.Tag,
+                                                    lst_hypernym_def_surfaces: Optional[List[Dict[str, str]]] = None) -> List[Dict[str, Any]]:
+        lst_sentences = []
         lst_words = []
         lst_surfaces = []; lst_entities = []
         possible_lemma_keys = {lemma["lemma_key"] for lemma in lst_lemmas}
@@ -224,7 +267,6 @@ class WordNetGlossDataset(Dataset):
             if surface_node.name == "wf":
                 surface = utils_wordnet_gloss.clean_up_surface(surface_node.text)
             elif surface_node.name == "glob":
-                # surface = utils_wordnet_gloss.lemma_to_surface(surface_node.get("lemma"))
                 surface = surface_node.select_one("id").get("lemma")
             else:
                 raise ValueError(f"unexpected surface node: {surface_node}")
@@ -267,8 +309,6 @@ class WordNetGlossDataset(Dataset):
         if len(lst_entities) == 0:
             if self._verbose:
                 warnings.warn(f"no entity has found: {example_node}")
-                # DEBUG
-                print(example_node)
 
         dict_sentence = {
             "type": "example",
@@ -277,5 +317,170 @@ class WordNetGlossDataset(Dataset):
             "entities": lst_entities,
             "surfaces": lst_surfaces
         }
+        lst_sentences.append(dict_sentence)
 
-        return dict_sentence
+        if lst_hypernym_def_surfaces is not None:
+            dict_sentence_ = copy.deepcopy(dict_sentence)
+            dict_sentence_["type"] = "example+hypernym.def"
+            dict_sentence_["words"] += [surface["surface"] for surface in lst_hypernym_def_surfaces]
+            dict_sentence_["tokenized_sentence"] = " ".join(dict_sentence_["words"])
+            dict_sentence_["surfaces"] += lst_hypernym_def_surfaces
+            lst_sentences.append(dict_sentence_)
+
+        return lst_sentences
+
+
+class ExtendedWordNetGlossDataset(Dataset):
+
+    def __init__(self, lst_path_gloss_corpus: Union[str, List[str]],
+                 filter_function: Optional[Union[Callable, List[Callable]]] = None,
+                 description: str = "",
+                 verbose: bool = False):
+        """
+        Extended gloss dataset used in SREF [Wang and Wang, EMNLP2020]
+        source: https://github.com/lwmlyy/SREF
+        ref: WANG, Ming; WANG, Yinglin. A Synset Relation-enhanced Framework with a Try-again Mechanism for Word Sense Disambiguation. In: Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP). 2020. p. 6229-6240.
+
+        @param lst_path_gloss_corpus: list of the path to pickle files.
+        @param filter_function: filter function(s) to be applied for annotated sentence object.
+        @param verbose: output verbosity.
+        """
+        super().__init__()
+
+        if isinstance(lst_path_gloss_corpus, str):
+            lst_path_gloss_corpus = [lst_path_gloss_corpus]
+        for path in lst_path_gloss_corpus:
+            assert os.path.exists(path), f"invalid path specified: {path}"
+
+        self._lst_path_gloss_corpus = lst_path_gloss_corpus
+
+        self._description = description
+
+        if filter_function is None:
+            self._filter_function = []
+        elif isinstance(filter_function, list):
+            self._filter_function = filter_function
+        elif not isinstance(filter_function, list):
+            self._filter_function = [filter_function]
+
+        self._verbose = verbose
+
+        # preload sentence object
+        self._dataset = self._preload_dataset()
+
+    def _preload_dataset(self):
+        print(f"loading dataset...")
+        lst_sentences = []
+        for obj_sentence in self._annotated_sentence_loader():
+            lst_sentences.append(obj_sentence)
+        print(f"loaded annotated sentences: {len(lst_sentences)}")
+
+        return lst_sentences
+
+    def _pickle_loader(self) -> Iterable[Dict[str, str]]:
+        for path in self._lst_path_gloss_corpus:
+            ifs = io.open(path, mode="rb")
+            dict_texts = pickle.load(ifs)
+
+            for synset_id, lst_sentences in dict_texts.items():
+                for sentence in lst_sentences:
+                    ret = {
+                        "synset_id": synset_id,
+                        "sentence": sentence
+                    }
+                    yield ret
+
+            ifs.close()
+
+    def _annotate_sentence(self, synset_id: str, sentence: str) -> List[Dict[str, Any]]:
+        lst_obj_sentences = []
+
+        synset = wn.synset(synset_id)
+        pos = synset.pos()
+        lemmas = synset.lemmas()
+        dict_lemmas = {lemma.name():lemma.key() for lemma in lemmas}
+        # assert len(dict_lemmas) == len(lemmas), f"duplicate lemma? {lemmas}"
+
+        # create annotated sentence object
+        # we just omit `surfaces` object because both PoS and baseform aren't available.
+        dict_sentence = {
+            "type": "extended.example",
+            "tokenized_sentence": sentence,
+            "words": sentence.split(" "),
+            "entities": [],
+            "surfaces": None
+        }
+
+        ### sense annotation ###
+
+        # 1. test if beginnig-of-sentence is the lemma of synset.
+        n_entity_span = synset_id.count("_") + 1
+        target_ = sentence.split(" ")[0:n_entity_span]
+        target = " ".join(target_)
+        matched_lemma, edit_distance = self.select_most_similar_string(target=target, lst_candidates=list(dict_lemmas.keys()))
+
+        src_char_length = min(len(target), len(matched_lemma))
+        if edit_distance / src_char_length > 0.5:
+            prepend_lemma = True
+        else:
+            prepend_lemma = False
+
+        # 2. if prepend_lemma = True, then prepend lemma as the sense-annotated entity.
+        if prepend_lemma:
+            for lemma, lemma_key in dict_lemmas.items():
+                surface_words = lemma.split("_")
+                entity = {
+                    "lemma": lemma,
+                    "ground_truth_lemma_keys": [lemma_key],
+                    "ground_truth_synset_ids": [synset_id],
+                    "pos": pos,
+                    "span": [0, len(surface_words)]
+                }
+                dict_sentence_ = copy.deepcopy(dict_sentence)
+                dict_sentence_["tokenized_sentence"] = lemma.replace("_"," ") + " " + sentence
+                dict_sentence_["words"] = surface_words + dict_sentence_["words"]
+                dict_sentence_["entities"] = [entity]
+                lst_obj_sentences.append(dict_sentence_)
+
+        # 3. if prepend_lemma = False, then markup beginnig-of-sentence as the sense-annotated entity.
+        else:
+            lemma_key = dict_lemmas[matched_lemma]
+            entity = {
+                "lemma": matched_lemma,
+                "ground_truth_lemma_keys": [lemma_key],
+                "ground_truth_synset_ids": [synset_id],
+                "pos": pos,
+                "span": [0, n_entity_span]
+            }
+            dict_sentence_ = copy.deepcopy(dict_sentence)
+            dict_sentence_["entities"] = [entity]
+            lst_obj_sentences.append(dict_sentence_)
+
+        return lst_obj_sentences
+
+    def _annotated_sentence_loader(self) -> Dict[str, Any]:
+        for record in self._pickle_loader():
+            lst_obj_sentence = self._annotate_sentence(synset_id=record["synset_id"], sentence=record["sentence"])
+            for obj_sentence in lst_obj_sentence:
+                # WordNetGlossDataset.validate_annotated_sentence(obj_sentence)
+                yield obj_sentence
+
+    @staticmethod
+    def select_most_similar_string(target: str, lst_candidates: List[str]):
+        lst_edit_distances = [Levenshtein.distance(target, candidate) for candidate in lst_candidates]
+        # sort by edit distance (ascending order)
+        lst_tup_sorted = sorted(zip(lst_edit_distances, lst_candidates))
+        # take most similar one
+        edit_distance, candidate = lst_tup_sorted[0]
+        return candidate, edit_distance
+
+    def __iter__(self):
+            for record in self._dataset:
+                flag = False
+                for filter_function in self._filter_function:
+                    if filter_function(record):
+                        flag = True
+                        break
+                if flag:
+                    continue
+                yield record
