@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
-
+import copy
 import io, os, json
 from typing import Union, Collection, Optional, Dict, Any, Iterable, Callable, List
 from torch.utils.data import Dataset
@@ -17,6 +17,7 @@ class WSDEvaluationDataset(Dataset):
     def __init__(self, path_corpus: str,
                  path_ground_truth_labels: str,
                  lookup_candidate_senses: bool = True,
+                 num_concat_surrounding_sentences: Optional[int] = None,
                  transform_functions = None,
                  filter_function: Optional[Union[Callable, List[Callable]]] = None,
                  entity_filter_function: Optional[Union[Callable, List[Callable]]] = None,
@@ -31,6 +32,7 @@ class WSDEvaluationDataset(Dataset):
 
         :param path_corpos: コーパスのパス (`*.data.xml`)
         :param path_ground_truth_labels: 正解ラベルのパス(`*.gold.key.txt`)
+        :param num_concat_surrounding_sentences: 同一文書内の前後n文を連結する．Noneの場合は無効．DEFAULT: None
         :param transform_functions: データ変形定義，Dictionaryを指定．keyはフィールド名，valueは変形用関数
         :param filter_function: 除外するか否かを判定する関数
         :param description: 説明
@@ -44,6 +46,7 @@ class WSDEvaluationDataset(Dataset):
 
         self._ground_truth_labels = self._load_ground_truth_labels(path=path_ground_truth_labels)
         self._lookup_candidate_senses = lookup_candidate_senses
+        self._num_concat_surrounding_sentences = 0 if num_concat_surrounding_sentences is None else num_concat_surrounding_sentences
 
         self._description = description
         self._transform_functions = transform_functions
@@ -63,6 +66,8 @@ class WSDEvaluationDataset(Dataset):
             self._entity_filter_function = [entity_filter_function]
 
         self._n_sample = None
+
+        self._records = self._preload_sentences()
 
     def _load_ground_truth_labels(self, path: str):
         dict_labels = {}
@@ -161,6 +166,19 @@ class WSDEvaluationDataset(Dataset):
         }
         return dict_sentence
 
+    @staticmethod
+    def concat_sentence_objects(source_sentence, lst_concat_sentences):
+        source_sentence_ = copy.deepcopy(source_sentence)
+        for concat_sentence in lst_concat_sentences:
+            # append tokenized sentence string
+            source_sentence_["tokenized_sentence"] += " " + concat_sentence["tokenized_sentence"]
+            # extend word sequence
+            source_sentence_["words"] += concat_sentence["words"]
+            # extend surface sequence
+            source_sentence_["surfaces"] += concat_sentence["surfaces"]
+
+        return source_sentence_
+
     def _sentence_loader(self) -> Iterable[Dict[str, Any]]:
         ifs = io.open(self._path, mode="r")
         soup = BeautifulSoup(ifs, features="lxml")
@@ -171,21 +189,33 @@ class WSDEvaluationDataset(Dataset):
 
         ifs.close()
 
-    def _record_loader(self):
-        if not hasattr(self, "_records"):
-            self._records = []
-            for record in self._sentence_loader():
-                # transform each field of the entry
-                entry = self._transform(record)
-                # verify the entry is valid or not
-                if self._filter(entry) == True:
-                    continue
-                # filter entities
-                record["entities"] = self._entity_filter(record["entities"])
+    def _preload_sentences(self) -> List[Dict[str, Any]]:
+        lst_sentences = []
+        for record in self._sentence_loader():
+            lst_sentences.append(record)
+        return lst_sentences
 
-                self._records.append(entry)
+    def _filter_transform_records(self):
+        offset = self._num_concat_surrounding_sentences
+        for idx, record in enumerate(self._records):
+            # (optional) concatenate surrounding sentences (previous and next N sentences)
+            if offset > 0:
+                document_id = record["document_id"]
+                lst_surrounding_sentences = self._records[max(0, idx-offset):idx]
+                lst_surrounding_sentences += self._records[idx+1:idx+offset+1]
+                lst_surrounding_sentences = [record for record in lst_surrounding_sentences if record["document_id"] == document_id]
+                assert len(lst_surrounding_sentences) > 0, f"something went wrong: {record}"
+                record = self.concat_sentence_objects(source_sentence=record, lst_concat_sentences=lst_surrounding_sentences)
 
-        return self._records
+            # transform each field of the entry
+            entry = self._transform(record)
+            # verify the entry is valid or not
+            if self._filter(entry) == True:
+                continue
+            # filter entities
+            record["entities"] = self._entity_filter(record["entities"])
+
+            yield record
 
     def _apply(self, apply_field_name: str, apply_function: Callable, na_value: Optional[Any] = None):
 
@@ -241,7 +271,7 @@ class WSDEvaluationDataset(Dataset):
                 if hasattr(function, "reset"):
                     function.reset()
 
-        iter_records = self._record_loader()
+        iter_records = self._filter_transform_records()
         n_read = 0
         for record in iter_records:
             yield record
@@ -270,7 +300,7 @@ class EntityLevelWSDEvaluationDataset(WSDEvaluationDataset):
                     entity[field_name] = sentence[field_name]
                 yield entity
 
-    def _record_loader(self):
+    def _filter_transform_records(self):
         if not hasattr(self, "_records"):
             self._records = []
             for record in self._sentence_entity_loader():
