@@ -34,6 +34,14 @@ cfg_evaluation = {
         "entity_filter_function": _noun_verb_entity_selector,
         "description": "WSD Evaluation Framework dataset [Raganato+, 2017]: Noun and verb entity only.",
     },
+    "WSDEval-noun-verb-concat-2": {
+        "path_corpus": os.path.join(DIR_EVALSET, "ALL/ALL.data.xml"),
+        "path_ground_truth_labels": os.path.join(DIR_EVALSET, "ALL/ALL.gold.key.txt"),
+        "lookup_candidate_senses": True,
+        "num_concat_surrounding_sentences": 2,
+        "entity_filter_function": _noun_verb_entity_selector,
+        "description": "WSD Evaluation Framework dataset [Raganato+, 2017]: Noun and verb entity only.",
+    },
     "WSDEval-ALL-bert-large-cased": {
         "path":os.path.join(DIR_EVALSET_EMBEDDINGS, "bert-large-cased_wsdeval-all.hdf5"),
         "padding": False,
@@ -47,7 +55,15 @@ cfg_evaluation = {
         "max_sequence_length": None,
         "filter_function":None,
         "description": "WSD Evaluation Framework dataset [Raganato+, 2017]: Noun and verb entity only, encoded by BERT-large-cased."
-    }
+    },
+    "WSDEval-noun-verb-concat-2-bert-large-cased": {
+        "path":os.path.join(DIR_EVALSET_EMBEDDINGS, "bert-large-cased_WSDEval-noun-verb-concat-2.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "filter_function":None,
+        "description": """WSD Evaluation Framework dataset [Raganato+, 2017]: Concatenates both before and after two sentences in the same document.\n
+Noun and verb entity only. encoded by BERT-large-cased."""
+    },
 }
 
 
