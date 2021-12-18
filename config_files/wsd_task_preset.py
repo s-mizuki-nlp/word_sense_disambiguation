@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 
-from dataset.evaluation import EntityLevelWSDEvaluationDataset
+# from dataset.evaluation import EntityLevelWSDEvaluationDataset
 from .wsd_task import CreateWSDTaskDataset, cfg_task_dataset
 from . import sense_annotated_corpus, monosemous_corpus, lexical_knowledge_datasets
 
 ### pre-defined datasets ###
-wsd_eval_wo_embeddings = EntityLevelWSDEvaluationDataset(**sense_annotated_corpus.cfg_evaluation["WSDEval-ALL"])
+# wsd_eval_wo_embeddings = EntityLevelWSDEvaluationDataset(**sense_annotated_corpus.cfg_evaluation["WSDEval-ALL"])
 
 wsd_eval_bert_large_cased = CreateWSDTaskDataset(
     cfg_bert_embeddings=sense_annotated_corpus.cfg_evaluation["WSDEval-ALL-bert-large-cased"],
