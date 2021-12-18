@@ -195,17 +195,23 @@ class WSDEvaluationDataset(Dataset):
             lst_sentences.append(record)
         return lst_sentences
 
-    def _filter_transform_records(self):
+    def get_record(self, idx: int):
         offset = self._num_concat_surrounding_sentences
-        for idx, record in enumerate(self._records):
-            # (optional) concatenate surrounding sentences (previous and next N sentences)
-            if offset > 0:
-                document_id = record["document_id"]
-                lst_surrounding_sentences = self._records[max(0, idx-offset):idx]
-                lst_surrounding_sentences += self._records[idx+1:idx+offset+1]
-                lst_surrounding_sentences = [record for record in lst_surrounding_sentences if record["document_id"] == document_id]
-                assert len(lst_surrounding_sentences) > 0, f"something went wrong: {record}"
-                record = self.concat_sentence_objects(source_sentence=record, lst_concat_sentences=lst_surrounding_sentences)
+        record = self._records[idx]
+        # (optional) concatenate surrounding sentences (previous and next N sentences)
+        if offset > 0:
+            document_id = record["document_id"]
+            lst_surrounding_sentences = self._records[max(0, idx-offset):idx]
+            lst_surrounding_sentences += self._records[idx+1:idx+offset+1]
+            lst_surrounding_sentences = [record for record in lst_surrounding_sentences if record["document_id"] == document_id]
+            assert len(lst_surrounding_sentences) > 0, f"something went wrong: {record}"
+            record = self.concat_sentence_objects(source_sentence=record, lst_concat_sentences=lst_surrounding_sentences)
+
+        return record
+
+    def _filter_transform_records(self):
+        for idx in range(len(self._records)):
+            record = self.get_record(idx)
 
             # transform each field of the entry
             entry = self._transform(record)
@@ -263,7 +269,7 @@ class WSDEvaluationDataset(Dataset):
         return False
 
     def __getitem__(self, index):
-        return self._records[index]
+        return self.get_record(index)
 
     def __iter__(self):
         if isinstance(self._transform_functions, dict):
@@ -294,21 +300,20 @@ class EntityLevelWSDEvaluationDataset(WSDEvaluationDataset):
 
     def _sentence_entity_loader(self):
         lst_copy_field_names = "corpus_id,document_id,sentence_id,words".split(",")
-        for sentence in super()._sentence_loader():
+
+        for sentence in super().__iter__():
             for entity in sentence["entities"]:
                 for field_name in lst_copy_field_names:
                     entity[field_name] = sentence[field_name]
                 yield entity
 
     def _filter_transform_records(self):
-        if not hasattr(self, "_records"):
-            self._records = []
-            for record in self._sentence_entity_loader():
-                # transform each field of the entry
-                entry = self._transform(record)
-                # verify the entry is valid or not
-                if self._filter(entry) == True:
-                    continue
-                self._records.append(entry)
+        for record in self._sentence_entity_loader():
+            # transform each field of the entry
+            entry = self._transform(record)
+            # verify the entry is valid or not
+            if self._filter(entry) == True:
+                continue
+            self._records.append(entry)
 
         return self._records
