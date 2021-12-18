@@ -16,6 +16,8 @@ DIR_TRAINSET = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Traini
 DIR_TRAINSET_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Training_Corpora/bert_embeddings/"
 DIR_WORDNET_GLOSS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_corpus/"
 DIR_WORDNET_GLOSS_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_corpus/bert_embeddings/"
+DIR_EXT_WORDNET_GLOSS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_augmentation/"
+DIR_EXT_WORDNET_GLOSS_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_augmentation/bert_embeddings/"
 
 # evaluation dataset for all-words WSD task
 cfg_evaluation = {
@@ -76,6 +78,22 @@ cfg_training = {
             os.path.join(DIR_WORDNET_GLOSS, "WordNet-3.0/glosstag/merged/noun.xml"),
             os.path.join(DIR_WORDNET_GLOSS, "WordNet-3.0/glosstag/merged/verb.xml")
         ],
+        "concat_hypernym_definition_sentence": False,
         "description": "Automatically annotated WordNet Gloss corpus for noun and verb."
-    }
+    },
+    "WordNet-Gloss-Augmented-noun-verb": {
+        "lst_path_gloss_corpus": [
+            os.path.join(DIR_WORDNET_GLOSS, "WordNet-3.0/glosstag/merged/noun.xml"),
+            os.path.join(DIR_WORDNET_GLOSS, "WordNet-3.0/glosstag/merged/verb.xml")
+        ],
+        "concat_hypernym_definition_sentence": True,
+        "description": "Automatically annotated WordNet Gloss corpus augmented using the definition sentence of hypernym. noun and verb."
+    },
+    "Extended-WordNet-Gloss-noun-verb": {
+        "lst_path_gloss_corpus": [
+            os.path.join(DIR_EXT_WORDNET_GLOSS, "sentence_dict_n"),
+            os.path.join(DIR_EXT_WORDNET_GLOSS, "sentence_dict_n")
+        ],
+        "description": "WordNet Gloss Corpus which is extended using Baidu translation. Used in [Wang and Wang, EMNLP2020]. for noun and verb."
+    },
 }
