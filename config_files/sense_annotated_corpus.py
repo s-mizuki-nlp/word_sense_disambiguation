@@ -27,6 +27,13 @@ cfg_evaluation = {
         "lookup_candidate_senses": True,
         "description": "WSD Evaluation Framework dataset [Raganato+, 2017]: ALL",
     },
+    "WSDEval-ALL-concat-2": {
+        "path_corpus": os.path.join(DIR_EVALSET, "ALL/ALL.data.xml"),
+        "path_ground_truth_labels": os.path.join(DIR_EVALSET, "ALL/ALL.gold.key.txt"),
+        "lookup_candidate_senses": True,
+        "num_concat_surrounding_sentences": 2,
+        "description": "WSD Evaluation Framework dataset [Raganato+, 2017]: Concatenates both before and after two sentences in the same document. ALL PoS tags.",
+    },
     "WSDEval-noun-verb": {
         "path_corpus": os.path.join(DIR_EVALSET, "ALL/ALL.data.xml"),
         "path_ground_truth_labels": os.path.join(DIR_EVALSET, "ALL/ALL.gold.key.txt"),
@@ -40,7 +47,7 @@ cfg_evaluation = {
         "lookup_candidate_senses": True,
         "num_concat_surrounding_sentences": 2,
         "entity_filter_function": _noun_verb_entity_selector,
-        "description": "WSD Evaluation Framework dataset [Raganato+, 2017]: Noun and verb entity only.",
+        "description": "WSD Evaluation Framework dataset [Raganato+, 2017]: Concatenates both before and after two sentences in the same document. Noun and verb entity only.",
     },
     "WSDEval-ALL-bert-large-cased": {
         "path":os.path.join(DIR_EVALSET_EMBEDDINGS, "bert-large-cased_wsdeval-all.hdf5"),
@@ -48,6 +55,13 @@ cfg_evaluation = {
         "max_sequence_length": None,
         "filter_function":None,
         "description": "WSD Evaluation Framework dataset [Raganato+, 2017] encoded by BERT-large-cased."
+    },
+    "WSDEval-ALL-concat-2-bert-large-cased": {
+        "path":os.path.join(DIR_EVALSET_EMBEDDINGS, "bert-large-cased_WSDEval-ALL-concat-2.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "filter_function":None,
+        "description": "WSD Evaluation Framework dataset [Raganato+, 2017] encoded by BERT-large-cased. Concatenates both before and after two sentences in the same document."
     },
     "WSDEval-noun-verb-bert-large-cased": {
         "path":os.path.join(DIR_EVALSET_EMBEDDINGS, "bert-large-cased_WSDEval-noun-verb.hdf5"),
