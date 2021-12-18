@@ -638,7 +638,8 @@ class TransformerEncoder(BaseEncoder):
             # tgt_mask: (n_digits + max(n_seq_len), n_digits + max(n_seq_len))
             n_seq_len_ = tgt.shape[1]
             tgt_mask_ = torch.zeros(size=(n_seq_len_, n_seq_len_), dtype=torch.float, device=device)
-            tgt_mask_[:n_digits, :n_digits] = tgt_mask
+            if tgt_mask is not None:
+                tgt_mask_[:n_digits, :n_digits] = tgt_mask
             tgt_mask = tgt_mask_
 
         # compute decoding
