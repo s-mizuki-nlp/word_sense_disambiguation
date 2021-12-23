@@ -126,4 +126,22 @@ cfg_training = {
         ],
         "description": "WordNet Gloss Corpus which is extended using Baidu translation. Used in [Wang and Wang, EMNLP2020]. for noun and verb."
     },
+    "WordNet-Gloss-noun-verb-bert-large-cased": {
+        "path":os.path.join(DIR_WORDNET_GLOSS_EMBEDDINGS, "bert-large-cased_WordNet-Gloss-noun-verb.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "description": "WordNet Gloss corpora encoded by BERT-large-cased."
+    },
+    "WordNet-Gloss-Augmented-noun-verb-bert-large-cased": {
+        "path":os.path.join(DIR_WORDNET_GLOSS_EMBEDDINGS, "bert-large-cased_WordNet-Gloss-Augmented-noun-verb.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "description": "WordNet Gloss augmented using hypernym def. sentences corpora encoded by BERT-large-cased."
+    },
+    "Extended-WordNet-Gloss-noun-verb-bert-large-cased": {
+        "path":os.path.join(DIR_EXT_WORDNET_GLOSS_EMBEDDINGS, "bert-large-cased_Extended-WordNet-Gloss-noun-verb.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "description": "Extended WordNet Gloss corpora encoded by BERT-large-cased."
+    },
 }
