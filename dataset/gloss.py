@@ -54,16 +54,24 @@ class WordNetGlossDataset(Dataset):
 
         return lst_sentences
 
+    def __len__(self):
+        return len(self._dataset)
+
     def __iter__(self):
-        for record in self._dataset:
-            flag = False
-            for filter_function in self._filter_function:
-                if filter_function(record):
-                    flag = True
-                    break
-            if flag:
-                continue
+        for idx in range(len(self)):
+            record = self.__getitem__(idx)
             yield record
+
+    def __getitem__(self, item):
+        record = self._dataset[item]
+        flag = False
+        for filter_function in self._filter_function:
+            if filter_function(record):
+                flag = True
+                break
+        if flag:
+            return None
+        return record
 
     def _synset_node_loader(self) -> Iterable[bs4.element.Tag]:
         for path in self._lst_path_gloss_corpus:
@@ -474,13 +482,21 @@ class ExtendedWordNetGlossDataset(Dataset):
         edit_distance, candidate = lst_tup_sorted[0]
         return candidate, edit_distance
 
+    def __len__(self):
+        return len(self._dataset)
+
     def __iter__(self):
-            for record in self._dataset:
-                flag = False
-                for filter_function in self._filter_function:
-                    if filter_function(record):
-                        flag = True
-                        break
-                if flag:
-                    continue
-                yield record
+        for idx in range(len(self)):
+            record = self.__getitem__(idx)
+            yield record
+
+    def __getitem__(self, item):
+        record = self._dataset[item]
+        flag = False
+        for filter_function in self._filter_function:
+            if filter_function(record):
+                flag = True
+                break
+        if flag:
+            return None
+        return record
