@@ -85,6 +85,7 @@ cfg_task_dataset = {
         "return_level":"entity",
         "record_entity_field_name":"entities",
         "record_entity_span_field_name":"subword_spans",
+        "ground_truth_lemma_keys_field_name":"ground_truth_lemma_keys",
         "copy_field_names_from_record_to_entity":None,
         "return_entity_subwords_avg_vector":True,
         "raise_error_on_unknown_lemma":True
