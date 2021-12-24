@@ -11,10 +11,6 @@ from collections import defaultdict
 import pickle
 import numpy as np
 import torch
-from torch.optim.optimizer import Optimizer
-from torch.utils.data import DataLoader
-from torch.utils.data._utils.collate import default_collate
-from torch.nn.modules.loss import _Loss
 from torch import optim
 from torch.optim import Adam
 from torch_optimizer import RAdam
@@ -22,7 +18,7 @@ from pytorch_lightning import LightningModule
 
 from model import HierarchicalCodeEncoder
 from model.loss_supervised import HyponymyScoreLoss, EntailmentProbabilityLoss, CrossEntropyLossWrapper
-from model.encoder_internal import BaseLogitAdjustableLayer
+from model.encoder_internal import BaseLogitAdjustableLayer, BasePrefixAwareLayer
 from custom.optimizer import AdamWithWarmup
 
 class SenseCodeTrainer(LightningModule):
@@ -176,6 +172,12 @@ class SenseCodeTrainer(LightningModule):
                     # c883c91
                     if not hasattr(logit_layer, "_additive"):
                         setattr(logit_layer, "_additive", False)
+
+                embed_layer = model._encoder._emb_layer
+                if isinstance(embed_layer, BasePrefixAwareLayer):
+                    # 28372b0
+                    if not hasattr(embed_layer, "_additive"):
+                        setattr(embed_layer, "_additive", False)
             else:
                 pass
 
