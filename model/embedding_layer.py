@@ -65,6 +65,7 @@ class HashCodeAwareEmbedding(BasePrefixAwareLayer):
         ret = super().summary()
         ret.update(self.emb_layer.summary())
         ret["n_seq_len"] = self.n_seq_len
+        ret["additive"] = self._additive
         return ret
 
 
