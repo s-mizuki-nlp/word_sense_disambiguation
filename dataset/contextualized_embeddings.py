@@ -130,3 +130,14 @@ class BERTEmbeddingsDataset(BERTEmbeddingsBatchDataset):
     @return_record_only.setter
     def return_record_only(self, flag: bool):
         self._return_record_only = flag
+
+    @property
+    def verbose(self):
+        ret = {
+            "path": self._path,
+            "num_sentences":self.num_sentences,
+            "n_dim":self.n_dim,
+            "return_record_only":self.return_record_only,
+            "description":self._description
+        }
+        return ret
