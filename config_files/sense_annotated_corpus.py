@@ -10,6 +10,8 @@ from dataset.filter import EmptyFilter, DictionaryFilter
 _no_entity_sentence_filter = EmptyFilter(check_field_names=["entities"])
 _noun_verb_entity_selector = DictionaryFilter(includes={"pos":{"n","v"}})
 
+from .utils import pick_first_available_path
+
 DIR_EVALSET = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Evaluation_Framework/Evaluation_Datasets/"
 DIR_EVALSET_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Evaluation_Framework/bert_embeddings/"
 DIR_TRAINSET = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Training_Corpora/"
@@ -18,6 +20,7 @@ DIR_WORDNET_GLOSS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordn
 DIR_WORDNET_GLOSS_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_corpus/bert_embeddings/"
 DIR_EXT_WORDNET_GLOSS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_augmentation/"
 DIR_EXT_WORDNET_GLOSS_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_augmentation/bert_embeddings/"
+DIR_TRAIN_UNSUPERVISED_LOCAL = "/tmp/sakae/"
 
 # evaluation dataset for all-words WSD task
 cfg_evaluation = {
@@ -127,19 +130,28 @@ cfg_training = {
         "description": "WordNet Gloss Corpus which is extended using Baidu translation. Used in [Wang and Wang, EMNLP2020]. for noun and verb."
     },
     "WordNet-Gloss-noun-verb-bert-large-cased": {
-        "path":os.path.join(DIR_WORDNET_GLOSS_EMBEDDINGS, "bert-large-cased_WordNet-Gloss-noun-verb.hdf5"),
+        "path": pick_first_available_path(
+            os.path.join(DIR_TRAIN_UNSUPERVISED_LOCAL, "bert-large-cased_WordNet-Gloss-noun-verb.hdf5"),
+            os.path.join(DIR_WORDNET_GLOSS_EMBEDDINGS, "bert-large-cased_WordNet-Gloss-noun-verb.hdf5")
+        ),
         "padding": False,
         "max_sequence_length": None,
         "description": "WordNet Gloss corpora encoded by BERT-large-cased."
     },
     "WordNet-Gloss-Augmented-noun-verb-bert-large-cased": {
-        "path":os.path.join(DIR_WORDNET_GLOSS_EMBEDDINGS, "bert-large-cased_WordNet-Gloss-Augmented-noun-verb.hdf5"),
+        "path": pick_first_available_path(
+            os.path.join(DIR_TRAIN_UNSUPERVISED_LOCAL, "bert-large-cased_WordNet-Gloss-Augmented-noun-verb.hdf5"),
+            os.path.join(DIR_WORDNET_GLOSS_EMBEDDINGS, "bert-large-cased_WordNet-Gloss-Augmented-noun-verb.hdf5")
+        ),
         "padding": False,
         "max_sequence_length": None,
         "description": "WordNet Gloss augmented using hypernym def. sentences corpora encoded by BERT-large-cased."
     },
     "Extended-WordNet-Gloss-noun-verb-bert-large-cased": {
-        "path":os.path.join(DIR_EXT_WORDNET_GLOSS_EMBEDDINGS, "bert-large-cased_Extended-WordNet-Gloss-noun-verb.hdf5"),
+        "path": pick_first_available_path(
+            os.path.join(DIR_TRAIN_UNSUPERVISED_LOCAL, "bert-large-cased_Extended-WordNet-Gloss-noun-verb.hdf5"),
+            os.path.join(DIR_EXT_WORDNET_GLOSS_EMBEDDINGS, "bert-large-cased_Extended-WordNet-Gloss-noun-verb.hdf5")
+        ),
         "padding": False,
         "max_sequence_length": None,
         "description": "Extended WordNet Gloss corpora encoded by BERT-large-cased."
