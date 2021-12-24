@@ -1,22 +1,30 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 
-from torch.utils.data import DataLoader, BufferedShuffleDataset
+from torch.utils.data import DataLoader, BufferedShuffleDataset, ChainDataset
 
 from dataset import WSDTaskDataset, WSDTaskDatasetCollateFunction
 from dataset.lexical_knowledge import LemmaDataset, SynsetDataset
 from dataset.contextualized_embeddings import BERTEmbeddingsDataset
 
 
-def CreateWSDTaskDataset(cfg_bert_embeddings: Dict[str, Any],
+def CreateWSDTaskDataset(cfg_bert_embeddings: Union[Dict[str, Any], List[Dict[str, Any]]],
                          cfg_lemmas: Dict[str, Any] = None,
                          cfg_synsets: Optional[Dict[str, Any]] = None,
                          **kwargs):
-    dataset_bert_embeddings = BERTEmbeddingsDataset(**cfg_bert_embeddings)
+    if isinstance(cfg_bert_embeddings, dict):
+        cfg_bert_embeddings = [cfg_bert_embeddings]
+
+    lst_dataset_bert_embeddings = [BERTEmbeddingsDataset(**cfg_) for cfg_ in cfg_bert_embeddings]
     dataset_lemmas = LemmaDataset(**cfg_lemmas) if cfg_lemmas is not None else None
     dataset_synsets = SynsetDataset(**cfg_synsets) if cfg_synsets is not None else None
+
+    if len(lst_dataset_bert_embeddings) == 1:
+        dataset_bert_embeddings = lst_dataset_bert_embeddings[0]
+    else:
+        dataset_bert_embeddings = ChainDataset(lst_dataset_bert_embeddings)
 
     dataset = WSDTaskDataset(
         bert_embeddings_dataset=dataset_bert_embeddings,
@@ -67,6 +75,15 @@ cfg_task_dataset = {
         "is_trainset": True,
         "return_level":"entity",
         "record_entity_field_name":"monosemous_entities",
+        "record_entity_span_field_name":"subword_spans",
+        "copy_field_names_from_record_to_entity":None,
+        "return_entity_subwords_avg_vector":True,
+        "raise_error_on_unknown_lemma":True
+    },
+    "TrainOnWordNetGlossCorpus": {
+        "is_trainset": True,
+        "return_level":"entity",
+        "record_entity_field_name":"entities",
         "record_entity_span_field_name":"subword_spans",
         "copy_field_names_from_record_to_entity":None,
         "return_entity_subwords_avg_vector":True,
