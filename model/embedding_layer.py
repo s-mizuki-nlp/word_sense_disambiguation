@@ -88,7 +88,35 @@ class PositionAwareEmbedding(torch.nn.Module):
         else:
             nn.init.uniform_(self.emb_layers.weight, lower, upper)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward_dense_input(self, x: torch.Tensor):
+        # x: (n_batch, n_digits, n_ary)
+        assert x.ndim == 3, f"unexpected dimension size: {x.ndim}"
+
+        n_batch, n_digits, n_ary = x.shape
+        num_diff = self.num_embeddings - n_ary
+        if num_diff == 0:
+            pass
+        elif num_diff > 0:
+            t_pad = torch.zeros((n_batch, n_digits, num_diff), device=x.device, dtype=torch.float)
+            # x: (n_batch, n_digits, n_ary + num_diff)
+            x = torch.cat((x, t_pad), dim=-1)
+        elif num_diff < 0:
+            raise ValueError(f"invalid input size: {n_ary} > {self.num_embeddings}")
+        #
+        if isinstance(self.emb_layers, nn.ModuleList):
+            it_x_and_w = zip(x.swapaxes(0,1), self.emb_layers)
+            lst_t_emb = [torch.matmul(x_d, emb_layer_d.weight) for x_d, emb_layer_d in it_x_and_w]
+            # t_emb: (n_batch, n_digits, n_dim)
+            t_emb = torch.stack(lst_t_emb, dim=1)
+        else:
+            # t_weights: (num_embeddings, n_dim)
+            t_weights = self.emb_layers.weight
+            # t_emb: (n_batch, n_digits, n_dim)
+            t_emb = torch.matmul(x, t_weights)
+
+        return t_emb
+
+    def forward_sparse_input(self, x: torch.Tensor):
         assert x.ndim == 2, f"unexpected dimension size: {x.ndim}"
         if isinstance(self.emb_layers, nn.ModuleList):
             n_digits = x.shape[-1]
@@ -97,6 +125,20 @@ class PositionAwareEmbedding(torch.nn.Module):
         else:
             t_emb = self.emb_layers.forward(x)
         return t_emb
+
+    def forward(self, x: torch.Tensor, is_dense_input: bool = False) -> torch.Tensor:
+        if is_dense_input:
+            return self.forward_dense_input(x)
+        else:
+            return self.forward_sparse_input(x)
+
+    @property
+    def num_embeddings(self):
+        if isinstance(self.emb_layers, nn.ModuleList):
+            emb_layer = self.emb_layers[0]
+        else:
+            emb_layer = self.emb_layers
+        return emb_layer.num_embeddings
 
     def summary(self):
         ret = {
