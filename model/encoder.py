@@ -18,8 +18,8 @@ from dataset.lexical_knowledge import SynsetDataset
 from .onmt.global_attention import GlobalAttention
 from .encoder_internal import \
     PositionalEncoding
-from .embedding_layer import HashCodeAwareEmbedding, PositionAwareEmbedding
-
+from .discretizer import GumbelSoftmax
+from .embedding_layer import PositionAwareEmbedding
 
 class BaseEncoder(nn.Module):
 
@@ -319,6 +319,7 @@ class TransformerEncoder(BaseEncoder):
                  pos_index: Dict[str, int],
                  softmax_logit_layer: nn.Module,
                  embed_layer: nn.Module,
+                 num_iteration: int = 0,
                  sequence_direction: str = "left_to_right",
                  concat_context_into_decoder_input: bool = False,
                  memory_encoder_input_feature: str = "entity",
@@ -336,6 +337,13 @@ class TransformerEncoder(BaseEncoder):
 
         if kwargs.get("teacher_forcing", False):
             warnings.warn(f"`teacher_forcing=True` is invalid for TransformerEncoder module.")
+        if num_iteration > 0:
+            assert sequence_direction == "both_inputless", f"`sequence_direction` must be 'both_inputless'."
+            assert isinstance(embed_layer, PositionAwareEmbedding), "`embed_layer` must be the instance of PositionAwareEmbedding class."
+            discretizer = GumbelSoftmax(temperature=1.0, add_gumbel_noise=True)
+        else:
+            discretizer = None
+
         if num_encoder_layers > 0:
             set_features = {"entity","context"}
             if memory_encoder_input_feature not in set_features:
@@ -350,6 +358,8 @@ class TransformerEncoder(BaseEncoder):
         self._n_dim_hidden = n_dim_emb
         self._n_digits = n_digits
         self._softmax_logit_layer = softmax_logit_layer
+        self._discretizer = discretizer
+        self._num_iteration = num_iteration
         self._emb_layer = embed_layer
         # self._n_ary = n_ary
         self._pos_index = pos_index
@@ -593,7 +603,7 @@ class TransformerEncoder(BaseEncoder):
                      **kwargs):
         """
 
-        @param input_sequence: (n_batch, <=n_digits). sequence of the input codes.
+        @param input_sequence: (n_batch, <=n_digits) or . sequence of the input codes.
         @param entity_embeddings: (n_batch, max(entity_span), n_emb). stack of the subword embeddings within entity span.
         @param entity_sequence_mask: (n_batch, max(entity_span)). mask of the entity embeddings.
         @param context_embeddings: embeddings of whole-sentence subwords. (n_batch, max(n_seq_len), n_dim)
@@ -603,10 +613,11 @@ class TransformerEncoder(BaseEncoder):
         """
 
         _, device = self._dtype_and_device(input_sequence)
-        n_digits = min(self._n_digits, input_sequence.shape[-1])
+        n_digits = min(self._n_digits, input_sequence.shape[1])
 
         # compute target embeddings: (n_batch, n_digits, n_dim_emb)
-        t_emb = self._emb_layer.forward(input_sequence) * math.sqrt(self._n_dim_hidden)
+        is_dense_input = input_sequence.ndim == 3
+        t_emb = self._emb_layer.forward(input_sequence, is_dense_input=is_dense_input) * math.sqrt(self._n_dim_hidden)
         tgt = self._pe_layer.forward(t_emb)
 
         # prepare memory embeddings and masks
@@ -695,8 +706,18 @@ class TransformerEncoder(BaseEncoder):
                                                 context_sequence_mask=context_sequence_mask,
                                                 subword_spans=subword_spans,
                                                 **kwargs)
+            if self._num_iteration > 0:
+                input_sequence = t_code_probs
+                for idx in range(self._num_iteration):
+                    _, t_code_probs = self.forward_base(input_sequence=input_sequence,
+                                                entity_embeddings=entity_embeddings,
+                                                entity_sequence_mask=entity_sequence_mask,
+                                                context_embeddings=context_embeddings,
+                                                context_sequence_mask=context_sequence_mask,
+                                                subword_spans=subword_spans,
+                                                **kwargs)
+                    input_sequence = t_code_probs
             t_codes = t_code_probs.argmax(dim=-1)
-
         else:
             for digit in range(self._n_digits):
                 if digit == 0:
@@ -764,13 +785,31 @@ class TransformerEncoder(BaseEncoder):
             dtype, device = self._dtype_and_device(entity_embeddings)
             input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device,
                                                          ground_truth_synset_codes=ground_truth_synset_codes)
-            return self.forward_base(input_sequence=input_sequence,
-                                     entity_embeddings=entity_embeddings,
-                                     entity_sequence_mask=entity_sequence_mask,
-                                     context_embeddings=context_embeddings,
-                                     context_sequence_mask=context_sequence_mask,
-                                     subword_spans=subword_spans,
-                                     **kwargs)
+            t_latent_code, t_code_prob = self.forward_base(input_sequence=input_sequence,
+                                         entity_embeddings=entity_embeddings,
+                                         entity_sequence_mask=entity_sequence_mask,
+                                         context_embeddings=context_embeddings,
+                                         context_sequence_mask=context_sequence_mask,
+                                         subword_spans=subword_spans,
+                                         **kwargs)
+
+            if self._num_iteration == 0:
+                return t_latent_code, t_code_prob
+            else:
+                # iterative decoding
+                for idx in range(self._num_iteration):
+                    if on_inference:
+                        input_sequence = t_code_prob
+                    else:
+                        input_sequence = self._discretizer.forward(t_code_prob, dim=-1)
+                    t_latent_code, t_code_prob = self.forward_base(input_sequence=input_sequence,
+                         entity_embeddings=entity_embeddings,
+                         entity_sequence_mask=entity_sequence_mask,
+                         context_embeddings=context_embeddings,
+                         context_sequence_mask=context_sequence_mask,
+                         subword_spans=subword_spans,
+                         **kwargs)
+                return t_latent_code, t_code_prob
 
     @property
     def has_discretizer(self):
@@ -817,13 +856,17 @@ class TransformerEncoder(BaseEncoder):
             "num_decoder_layers": self._num_decoder_layers,
             "num_encoder_layers": self._num_encoder_layers,
             "memory_encoder_input_feature": self._memory_encoder_input_feature,
+            "concat_context_into_decoder_input": self._concat_context_into_decoder_input,
             "pos_index": self._pos_index,
             "layer_normalization": self._layer_normalization,
             "embedding_layer_class": self._emb_layer.__class__.__name__,
-            "logit_layer_class": self._softmax_logit_layer.__class__.__name__
+            "logit_layer_class": self._softmax_logit_layer.__class__.__name__,
+            "num_iteration": self._num_iteration
         }
         if hasattr(self._softmax_logit_layer, "summary"):
             ret["logit_layer"] = self._softmax_logit_layer.summary()
         if hasattr(self._emb_layer, "summary"):
             ret["embed_layer"] = self._emb_layer.summary()
+        if self._discretizer is not None:
+            ret["discretizer"] = self._discretizer.summary()
         return ret
