@@ -320,6 +320,7 @@ class TransformerEncoder(BaseEncoder):
                  softmax_logit_layer: nn.Module,
                  embed_layer: nn.Module,
                  num_iteration: int = 0,
+                 average_output: bool = False,
                  sequence_direction: str = "left_to_right",
                  concat_context_into_decoder_input: bool = False,
                  memory_encoder_input_feature: str = "entity",
@@ -360,6 +361,7 @@ class TransformerEncoder(BaseEncoder):
         self._softmax_logit_layer = softmax_logit_layer
         self._discretizer = discretizer
         self._num_iteration = num_iteration
+        self._average_output = average_output
         self._emb_layer = embed_layer
         # self._n_ary = n_ary
         self._pos_index = pos_index
@@ -785,7 +787,7 @@ class TransformerEncoder(BaseEncoder):
             dtype, device = self._dtype_and_device(entity_embeddings)
             input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device,
                                                          ground_truth_synset_codes=ground_truth_synset_codes)
-            t_latent_code, t_code_prob = self.forward_base(input_sequence=input_sequence,
+            t_latent_code, t_code_prob_i = self.forward_base(input_sequence=input_sequence,
                                          entity_embeddings=entity_embeddings,
                                          entity_sequence_mask=entity_sequence_mask,
                                          context_embeddings=context_embeddings,
@@ -794,21 +796,32 @@ class TransformerEncoder(BaseEncoder):
                                          **kwargs)
 
             if self._num_iteration == 0:
-                return t_latent_code, t_code_prob
+                return t_latent_code, t_code_prob_i
             else:
                 # iterative decoding
+                t_code_prob = t_code_prob_i
                 for idx in range(self._num_iteration):
                     if on_inference:
-                        input_sequence = t_code_prob
+                        input_sequence = t_code_prob_i
                     else:
-                        input_sequence = self._discretizer.forward(t_code_prob, dim=-1)
-                    t_latent_code, t_code_prob = self.forward_base(input_sequence=input_sequence,
+                        input_sequence = self._discretizer.forward(t_code_prob_i, dim=-1)
+                    t_latent_code, t_code_prob_i = self.forward_base(input_sequence=input_sequence,
                          entity_embeddings=entity_embeddings,
                          entity_sequence_mask=entity_sequence_mask,
                          context_embeddings=context_embeddings,
                          context_sequence_mask=context_sequence_mask,
                          subword_spans=subword_spans,
                          **kwargs)
+                    # cumulate on t_code_prob
+                    t_code_prob = t_code_prob + t_code_prob_i
+
+                if on_inference or (not self._average_output):
+                    # return last iteration output
+                    t_code_prob = t_code_prob_i
+                else:
+                    # return average of all iteration outputs
+                    t_code_prob = t_code_prob / (self._num_iteration + 1)
+
                 return t_latent_code, t_code_prob
 
     @property
@@ -861,7 +874,8 @@ class TransformerEncoder(BaseEncoder):
             "layer_normalization": self._layer_normalization,
             "embedding_layer_class": self._emb_layer.__class__.__name__,
             "logit_layer_class": self._softmax_logit_layer.__class__.__name__,
-            "num_iteration": self._num_iteration
+            "num_iteration": self._num_iteration,
+            "average_output": self._average_output
         }
         if hasattr(self._softmax_logit_layer, "summary"):
             ret["logit_layer"] = self._softmax_logit_layer.summary()
