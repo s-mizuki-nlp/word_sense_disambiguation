@@ -430,8 +430,10 @@ class TransformerEncoder(BaseEncoder):
     def create_sequence_inputs(self, lst_pos: List[str], device,
                                ground_truth_synset_codes: Optional[Union[List[List[int]], torch.Tensor]] = None,
                                trim: bool = True,
-                               mask_index: int = 0) -> torch.Tensor:
+                               mask_index: int = 0,
+                               sequence_direction: Optional[str] = None) -> torch.Tensor:
 
+        sequence_direction = self._sequence_direction if sequence_direction is None else sequence_direction
         n_batch = len(lst_pos)
         if ground_truth_synset_codes is None:
             n_sense_code_digits = 0
@@ -442,13 +444,13 @@ class TransformerEncoder(BaseEncoder):
             n_sense_code_digits = ground_truth_synset_codes.shape[-1]
         n_seq_len = min(self._n_digits, n_sense_code_digits + 1)
 
-        if self._sequence_direction == "both":
+        if sequence_direction == "both":
             t_inputs = ground_truth_synset_codes
 
-        if self._sequence_direction == "both_inputless":
+        if sequence_direction == "both_inputless":
             t_inputs = torch.full(size=(n_batch, n_seq_len), fill_value=mask_index, device="cpu", dtype=torch.long).to(device)
 
-        elif self._sequence_direction == "left_to_right":
+        elif sequence_direction == "left_to_right":
             # 1. prepend PoS index
             # t_boc: (n_batch, 1)
             lst_pos_idx = [self._pos_index[pos] for pos in lst_pos]
@@ -466,7 +468,7 @@ class TransformerEncoder(BaseEncoder):
             if trim:
                 t_inputs = t_inputs[:,:self._n_digits]
 
-        elif self._sequence_direction == "right_to_left":
+        elif sequence_direction == "right_to_left":
             # 1. prepare to-be-appended
             t_eoc = torch.full(size=(n_batch, 1), fill_value=mask_index, device="cpu", dtype=torch.long).to(device)
 
@@ -709,8 +711,9 @@ class TransformerEncoder(BaseEncoder):
                                                 subword_spans=subword_spans,
                                                 **kwargs)
             if self._num_iteration > 0:
-                input_sequence = t_code_probs
                 for idx in range(self._num_iteration):
+                    # input_sequence = t_code_probs
+                    input_sequence = t_code_probs.argmax(dim=-1)
                     _, t_code_probs = self.forward_base(input_sequence=input_sequence,
                                                 entity_embeddings=entity_embeddings,
                                                 entity_sequence_mask=entity_sequence_mask,
@@ -718,7 +721,6 @@ class TransformerEncoder(BaseEncoder):
                                                 context_sequence_mask=context_sequence_mask,
                                                 subword_spans=subword_spans,
                                                 **kwargs)
-                    input_sequence = t_code_probs
             t_codes = t_code_probs.argmax(dim=-1)
         else:
             for digit in range(self._n_digits):
@@ -801,10 +803,16 @@ class TransformerEncoder(BaseEncoder):
                 # iterative decoding
                 t_code_prob = t_code_prob_i
                 for idx in range(self._num_iteration):
-                    if on_inference:
-                        input_sequence = t_code_prob_i
+                    # if on_inference:
+                    #     input_sequence = t_code_prob_i
+                    # else:
+                    #     input_sequence = self._discretizer.forward(t_code_prob_i, dim=-1)
+
+                    # apply argmax if average_output = True otherwise pass-through
+                    if self._average_output:
+                        input_sequence = t_code_prob_i.detach().argmax(dim=-1)
                     else:
-                        input_sequence = self._discretizer.forward(t_code_prob_i, dim=-1)
+                        input_sequence = t_code_prob_i
                     t_latent_code, t_code_prob_i = self.forward_base(input_sequence=input_sequence,
                          entity_embeddings=entity_embeddings,
                          entity_sequence_mask=entity_sequence_mask,
