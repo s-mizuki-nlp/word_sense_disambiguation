@@ -713,7 +713,9 @@ class TransformerEncoder(BaseEncoder):
             if self._num_iteration > 0:
                 for idx in range(self._num_iteration):
                     # input_sequence = t_code_probs
-                    input_sequence = t_code_probs.argmax(dim=-1)
+                    predicted_codes = t_code_probs.argmax(dim=-1)
+                    input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=predicted_codes,
+                                                                 sequence_direction="left_to_right")
                     _, t_code_probs = self.forward_base(input_sequence=input_sequence,
                                                 entity_embeddings=entity_embeddings,
                                                 entity_sequence_mask=entity_sequence_mask,
@@ -810,7 +812,9 @@ class TransformerEncoder(BaseEncoder):
 
                     # apply argmax if average_output = True otherwise pass-through
                     if self._average_output:
-                        input_sequence = t_code_prob_i.detach().argmax(dim=-1)
+                        predicted_codes = t_code_prob_i.detach().argmax(dim=-1)
+                        input_sequence = self.create_sequence_inputs(lst_pos=pos, device=device, ground_truth_synset_codes=predicted_codes,
+                                                                 sequence_direction="left_to_right")
                     else:
                         input_sequence = t_code_prob_i
                     t_latent_code, t_code_prob_i = self.forward_base(input_sequence=input_sequence,
