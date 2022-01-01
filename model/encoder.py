@@ -653,6 +653,7 @@ class TransformerEncoder(BaseEncoder):
             tgt_mask_ = torch.zeros(size=(n_seq_len_, n_seq_len_), dtype=torch.float, device=device)
             if tgt_mask is not None:
                 tgt_mask_[:n_digits, :n_digits] = tgt_mask
+                tgt_mask_[n_digits:, :n_digits] = float("-inf")
             tgt_mask = tgt_mask_
 
         # compute decoding
