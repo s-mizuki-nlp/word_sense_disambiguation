@@ -709,7 +709,7 @@ class TransformerEncoder(BaseEncoder):
                                                 subword_spans=subword_spans,
                                                 **kwargs)
             if self._num_iteration > 0:
-                input_sequence = t_code_probs
+                input_sequence = t_code_probs.argmax(dim=-1)
                 for idx in range(self._num_iteration):
                     _, t_code_probs = self.forward_base(input_sequence=input_sequence,
                                                 entity_embeddings=entity_embeddings,
@@ -718,7 +718,6 @@ class TransformerEncoder(BaseEncoder):
                                                 context_sequence_mask=context_sequence_mask,
                                                 subword_spans=subword_spans,
                                                 **kwargs)
-                    input_sequence = t_code_probs
             t_codes = t_code_probs.argmax(dim=-1)
         else:
             for digit in range(self._n_digits):
