@@ -486,6 +486,20 @@ class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
 class CrossEntropyLossWrapper(L.CrossEntropyLoss):
 
+    def __init__(self, digit_aware_weights: bool = False, n_digits: Optional[int] = None,
+                 weight: Optional[torch.Tensor] = None, size_average=None, ignore_index: int = -100,
+                 reduce=None, reduction: str = 'mean') -> None:
+        if digit_aware_weights:
+            assert n_digits is not None, f"you must specify `n_digits` when digit_aware_weights=True"
+            reduction = "none"
+            digit_weights_ = torch.arange(start=n_digits, end=0, step=-1)
+            digit_weights_ = digit_weights_ / digit_weights_.sum()
+            # digit_weights: (1, n_digits)
+            self.digit_weights = digit_weights_.unsqueeze(0)
+
+        super().__init__(weight, size_average, ignore_index, reduce, reduction)
+        self.digit_aware_weights = digit_aware_weights
+
     def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.Tensor, eps=1E-15) -> torch.Tensor:
         """
 
@@ -494,7 +508,14 @@ class CrossEntropyLossWrapper(L.CrossEntropyLoss):
         """
         input_score = torch.log(input_code_probabilities + eps).swapaxes(1,2)
 
-        return super().forward(input_score, target_codes)
+        if self.digit_aware_weights:
+            device = input_code_probabilities.device
+            # log_losses: (n_batch, n_digits)
+            log_losses = super().forward(input_score, target_codes)
+            log_loss = torch.mean(log_losses * self.digit_weights.to(device))
+        else:
+            log_loss = super().forward(input_score, target_codes)
+        return log_loss
 
     @property
     def scale(self):
