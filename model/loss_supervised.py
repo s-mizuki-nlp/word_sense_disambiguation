@@ -435,6 +435,14 @@ class CodeLengthProbabilityLoss(HyponymyScoreLoss):
 
         return loss
 
+    def summary(self):
+        ret = {
+            "class_name": self.__class__.__name__,
+            "label_smoothing_factor": self._label_smoothing_factor,
+            "weight_by_ground_truth_code_length":self._weight_by_ground_truth_code_length
+        }
+        return ret
+
 
 class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
