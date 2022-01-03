@@ -378,6 +378,64 @@ class HyponymyScoreLoss(_SenseCodeBaseLoss):
         return ret
 
 
+class CodeLengthProbabilityLoss(HyponymyScoreLoss):
+
+    def __init__(self, label_smoothing_factor: Optional[float] = None,
+                 weight_by_ground_truth_code_length: bool = False,
+                 size_average=None, reduce=None, reduction='mean') -> None:
+
+        super().__init__(
+                    normalize_by_ground_truth_code_length=False,
+                    log_scale=True,
+                    weight_by_ground_truth_code_length=weight_by_ground_truth_code_length,
+                    margin_on_code_length_penalty=0.0,
+                    distance_metric="mse",
+                    label_smoothing_factor=label_smoothing_factor,
+                    size_average=size_average, reduce=reduce, reduction=reduction)
+
+    def calc_log_break_probability(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
+        t_break_intensity = self._calc_break_intensity(t_prob_c_x, t_prob_c_y)
+        # t_log_prob_break: (n_batch, n_digits+1)
+        t_log_prob_break = self._intensity_to_log_probability(t_break_intensity)
+
+        return t_log_prob_break
+
+    def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor, eps: float = 1E-15) -> torch.Tensor:
+        """
+        evaluates loss of the predicted hyponymy score and true hyponymy score.
+
+        :param input_code_probabilities: probability array. shape: (n_batch, n_digits, n_ary), t_prob_c_batch[b,n,m] = p(c_n=m|x_b)
+        :param target_codes: list of (hypernym index, hyponym index, hyponymy score) tuples
+        """
+
+        # dtype, device = self._dtype_and_device(input_code_probabilities)
+        n_digits, n_ary = input_code_probabilities.shape[1:]
+
+        # x: ground-truth, y: predicted probability
+
+        # clamp values so that it won't produce nan value.
+        t_prob_c_y = torch.clamp(input_code_probabilities, min=eps, max=(1.0 - eps))
+
+        # convert to one-hot encoding
+        t_prob_c_x = self._one_hot_encoding(t_codes=target_codes, n_ary=n_ary, label_smoothing_factor=self._label_smoothing_factor)
+
+        # t_log_length_prob = Pr{break at d}; d \in {0, n_digits}
+        # t_log_length_prob: (n_batch, n_digits+1)
+        t_log_length_prob = self.calc_log_break_probability(t_prob_c_x=t_prob_c_x, t_prob_c_y=t_prob_c_y)
+
+        # y_true: (n_batch,)
+        y_true = torch.count_nonzero(target_codes, dim=-1)
+
+        if self._weight_by_ground_truth_code_length:
+            # put more weights on shorter codes.
+            length_weight = torch.arange(start=n_digits+1, end=0, step=-1, device=target_codes.device, dtype=torch.float)
+            loss = F.cross_entropy(input=t_log_length_prob, target=y_true, weight=length_weight, reduction=self.reduction)
+        else:
+            loss = F.cross_entropy(input=t_log_length_prob, target=y_true, reduction=self.reduction)
+
+        return loss
+
+
 class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
     def __init__(self,
