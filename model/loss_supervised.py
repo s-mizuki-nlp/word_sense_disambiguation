@@ -367,6 +367,16 @@ class HyponymyScoreLoss(_SenseCodeBaseLoss):
 
         return loss
 
+    def summary(self):
+        ret = {
+            "class_name": self.__class__.__name__,
+            "distance_metric": self._distance_metric,
+            "log_scale": self._log_scale,
+            "margin_on_code_length_penalty":self._margin_on_code_length_penalty,
+            "weight_by_ground_truth_code_length":self._weight_by_ground_truth_code_length
+        }
+        return ret
+
 
 class EntailmentProbabilityLoss(HyponymyScoreLoss):
 
@@ -521,6 +531,15 @@ class CrossEntropyLossWrapper(L.CrossEntropyLoss):
     def scale(self):
         return 1.0
 
+    def summary(self):
+        ret = {
+            "class_name": self.__class__.__name__,
+            "ignore_index": self.ignore_index,
+            "digit_aware_weights": self.digit_aware_weights,
+            "reduction":self.reduction
+        }
+        return ret
+
 
 class FocalCrossEntropyLoss(nn.CrossEntropyLoss):
     ''' Focal loss for classification tasks on imbalanced datasets '''
@@ -559,3 +578,13 @@ class FocalCrossEntropyLoss(nn.CrossEntropyLoss):
             return torch.sum(loss)
         else:
             return loss
+
+    def summary(self):
+        ret = {
+            "class_name": self.__class__.__name__,
+            "gamma": self.gamma,
+            "ignore_index": self.ignore_index,
+            "reduction":self.reduction,
+            "along_with_axes":self.along_with_axes
+        }
+        return ret
