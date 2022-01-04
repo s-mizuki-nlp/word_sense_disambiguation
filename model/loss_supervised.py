@@ -382,7 +382,11 @@ class CodeLengthProbabilityLoss(HyponymyScoreLoss):
 
     def __init__(self, label_smoothing_factor: Optional[float] = None,
                  weight_by_ground_truth_code_length: bool = False,
+                 weight_on_digits_gamma: Optional[float] = None,
                  size_average=None, reduce=None, reduction='mean') -> None:
+
+        if weight_by_ground_truth_code_length and (weight_on_digits_gamma is not None):
+            raise ValueError(f"you can't use both `weight_by_ground_truth_code_length` and `weight_on_digits_gamma`")
 
         super().__init__(
                     normalize_by_ground_truth_code_length=False,
@@ -392,6 +396,7 @@ class CodeLengthProbabilityLoss(HyponymyScoreLoss):
                     distance_metric="mse",
                     label_smoothing_factor=label_smoothing_factor,
                     size_average=size_average, reduce=reduce, reduction=reduction)
+        self._weight_on_digits_gamma = weight_on_digits_gamma
 
     def calc_log_break_probability(self, t_prob_c_x: torch.Tensor, t_prob_c_y: torch.Tensor):
         t_break_intensity = self._calc_break_intensity(t_prob_c_x, t_prob_c_y)
@@ -399,6 +404,17 @@ class CodeLengthProbabilityLoss(HyponymyScoreLoss):
         t_log_prob_break = self._intensity_to_log_probability(t_break_intensity)
 
         return t_log_prob_break
+
+    def calc_weight_on_digits(self, target_codes: torch.LongTensor, gamma: float) -> torch.Tensor:
+        n_batch, n_digits = target_codes.shape
+        device = target_codes.device
+        pad = torch.full(size=(n_batch, 1), fill_value=True, device=device)
+        # mask: (n_batch, n_digits+1)
+        mask = torch.cat([pad, target_codes != 0], dim=-1)
+        t_weights = mask * (gamma ** torch.arange(start=0, end=n_digits+1, device=device))
+        t_weights = t_weights / t_weights.sum(dim=-1, keepdims=True)
+
+        return t_weights
 
     def forward(self, input_code_probabilities: torch.Tensor, target_codes: torch.LongTensor, eps: float = 1E-15) -> torch.Tensor:
         """
@@ -426,12 +442,22 @@ class CodeLengthProbabilityLoss(HyponymyScoreLoss):
         # y_true: (n_batch,)
         y_true = torch.count_nonzero(target_codes, dim=-1)
 
-        if self._weight_by_ground_truth_code_length:
-            # put more weights on shorter codes.
-            length_weight = torch.arange(start=n_digits+1, end=0, step=-1, device=target_codes.device, dtype=torch.float)
-            loss = F.cross_entropy(input=t_log_length_prob, target=y_true, weight=length_weight, reduction=self.reduction)
+        if self._weight_on_digits_gamma is not None:
+            t_weights = self.calc_weight_on_digits(target_codes=target_codes, gamma=self._weight_on_digits_gamma)
+            losses = - t_weights * t_log_length_prob
+            if self.reduction == "sum":
+                loss = torch.sum(losses)
+            elif self.reduction == "mean":
+                loss = torch.mean(losses)
+            else:
+                loss = losses
         else:
-            loss = F.cross_entropy(input=t_log_length_prob, target=y_true, reduction=self.reduction)
+            if self._weight_by_ground_truth_code_length:
+                # put more weights on shorter codes.
+                length_weight = torch.arange(start=n_digits+1, end=0, step=-1, device=target_codes.device, dtype=torch.float)
+            else:
+                length_weight = None
+            loss = F.cross_entropy(input=t_log_length_prob, target=y_true, reduction=self.reduction, weight=length_weight)
 
         return loss
 
