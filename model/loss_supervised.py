@@ -592,7 +592,7 @@ class CrossEntropyLossWrapper(L.CrossEntropyLoss):
                  weight: Optional[torch.Tensor] = None, size_average=None, ignore_index: int = -100,
                  reduce=None, reduction: str = 'mean') -> None:
         if digit_aware_weight_coef is not None:
-            assert n_digits is not None, f"you must specify `n_digits` when digit_aware_weights=True"
+            assert n_digits is not None, f"you must specify `n_digits` when digit_aware_weight_coef is not None."
             reduction = "none"
             digit_weights_ = torch.arange(start=n_digits, end=0, step=-1) * digit_aware_weight_coef
             digit_weights_ = digit_weights_ / digit_weights_.sum()
