@@ -67,7 +67,8 @@ class WSDEvaluationDataset(Dataset):
 
         self._n_sample = None
 
-        self._records = self._preload_sentences()
+        self._raw_records = self._preload_sentences()
+        self._preprocessed_records = [record for record in self]
 
     def _load_ground_truth_labels(self, path: str):
         dict_labels = {}
@@ -197,31 +198,28 @@ class WSDEvaluationDataset(Dataset):
 
     def get_record(self, idx: int):
         offset = self._num_concat_surrounding_sentences
-        record = self._records[idx]
+        record = self._raw_records[idx]
         # (optional) concatenate surrounding sentences (previous and next N sentences)
         if offset > 0:
             document_id = record["document_id"]
-            lst_surrounding_sentences = self._records[max(0, idx-offset):idx]
-            lst_surrounding_sentences += self._records[idx+1:idx+offset+1]
+            lst_surrounding_sentences = self._raw_records[max(0, idx - offset):idx]
+            lst_surrounding_sentences += self._raw_records[idx + 1:idx + offset + 1]
             lst_surrounding_sentences = [record for record in lst_surrounding_sentences if record["document_id"] == document_id]
             assert len(lst_surrounding_sentences) > 0, f"something went wrong: {record}"
             record = self.concat_sentence_objects(source_sentence=record, lst_concat_sentences=lst_surrounding_sentences)
 
         return record
 
-    def _filter_transform_records(self):
-        for idx in range(len(self._records)):
-            record = self.get_record(idx)
+    def _filter_transform_records(self, record):
+        # transform each field of the entry
+        entry = self._transform(record)
+        # filter entities
+        entry["entities"] = self._entity_filter(entry["entities"])
+        # verify the entry is valid or not
+        if self._filter(entry) == True:
+            return None
 
-            # transform each field of the entry
-            entry = self._transform(record)
-            # verify the entry is valid or not
-            if self._filter(entry) == True:
-                continue
-            # filter entities
-            record["entities"] = self._entity_filter(record["entities"])
-
-            yield record
+        return entry
 
     def _apply(self, apply_field_name: str, apply_function: Callable, na_value: Optional[Any] = None):
 
@@ -269,7 +267,7 @@ class WSDEvaluationDataset(Dataset):
         return False
 
     def __getitem__(self, index):
-        return self.get_record(index)
+        return self._preprocessed_records[index]
 
     def __iter__(self):
         if isinstance(self._transform_functions, dict):
@@ -277,12 +275,13 @@ class WSDEvaluationDataset(Dataset):
                 if hasattr(function, "reset"):
                     function.reset()
 
-        iter_records = self._filter_transform_records()
-        n_read = 0
-        for record in iter_records:
-            yield record
-
-            n_read += 1
+        for idx in range(len(self._raw_records)):
+            record = self.get_record(idx)
+            record = self._filter_transform_records(record)
+            if record is None:
+                continue
+            else:
+                yield record
 
     @property
     def verbose(self):
