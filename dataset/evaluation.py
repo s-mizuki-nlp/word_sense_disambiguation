@@ -294,26 +294,3 @@ class WSDEvaluationDataset(Dataset):
             "transform_functions": self._transform_functions
         }
         return ret
-
-
-class EntityLevelWSDEvaluationDataset(WSDEvaluationDataset):
-
-    def _sentence_entity_loader(self):
-        lst_copy_field_names = "corpus_id,document_id,sentence_id,words".split(",")
-
-        for sentence in super().__iter__():
-            for entity in sentence["entities"]:
-                for field_name in lst_copy_field_names:
-                    entity[field_name] = sentence[field_name]
-                yield entity
-
-    def _filter_transform_records(self):
-        for record in self._sentence_entity_loader():
-            # transform each field of the entry
-            entry = self._transform(record)
-            # verify the entry is valid or not
-            if self._filter(entry) == True:
-                continue
-            self._records.append(entry)
-
-        return self._records
