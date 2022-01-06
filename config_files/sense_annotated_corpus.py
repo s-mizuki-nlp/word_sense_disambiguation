@@ -15,7 +15,7 @@ from .utils import pick_first_available_path
 DIR_EVALSET = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Evaluation_Framework/Evaluation_Datasets/"
 DIR_EVALSET_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Evaluation_Framework/bert_embeddings/"
 DIR_TRAINSET = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Training_Corpora/"
-DIR_TRAINSET_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Training_Corpora/bert_embeddings/"
+DIR_TRAINSET_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Training_Corpora/SemCor/bert_embeddings/"
 DIR_WORDNET_GLOSS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_corpus/"
 DIR_WORDNET_GLOSS_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_corpus/bert_embeddings/"
 DIR_EXT_WORDNET_GLOSS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_augmentation/"
@@ -105,6 +105,12 @@ cfg_training = {
         "padding": False,
         "max_sequence_length": None,
         "description": "WSD SemCor corpora (excluding no-sense-annotated sentences) encoded by BERT-large-cased."
+    },
+    "SemCor-noun-verb-bert-large-cased": {
+        "path":os.path.join(DIR_TRAINSET_EMBEDDINGS, "bert-large-cased_SemCor-noun-verb.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "description": "WSD SemCor corpora (excluding no-sense-annotated sentences) encoded by BERT-large-cased. selects noun and verb entity only."
     },
     "WordNet-Gloss-noun-verb": {
         "lst_path_gloss_corpus": [
