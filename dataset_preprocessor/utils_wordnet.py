@@ -88,3 +88,7 @@ def ptb_tagset_to_wordnet_tagset(ptb_tag, na_value = "o"):
     """
     univ_tag = _MAP_PTB_TO_UNIVERSAL[ptb_tag]
     return universal_tagset_to_wordnet_tagset(univ_tag, na_value)
+
+def lemma_to_surface_form(lemma: wn.lemma):
+    return lemma.name().replace('_', ' ')
+
