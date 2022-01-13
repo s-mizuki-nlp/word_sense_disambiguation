@@ -4,7 +4,7 @@ import warnings
 from typing import Set, Optional, Dict, Any, Iterator, Union, List, Iterable
 
 import torch
-import pydash
+import numpy as np
 
 from .contextualized_embeddings import BERTEmbeddingsDataset
 from .lexical_knowledge import LemmaDataset, SynsetDataset
@@ -27,6 +27,8 @@ class WSDTaskDataset(IterableDataset):
                  ground_truth_lemma_keys_field_name: Optional[str] = None,
                  copy_field_names_from_record_to_entity: Optional[Iterable[str]] = None,
                  return_entity_subwords_avg_vector: bool = False,
+                 weighted_average_entity_embeddings_and_sentence_embedding: float = 0.0,
+                 normalize_embeddings: bool = False,
                  raise_error_on_unknown_lemma: bool = True,
                  excludes: Optional[Set[str]] = None):
 
@@ -41,6 +43,8 @@ class WSDTaskDataset(IterableDataset):
         self._ground_truth_lemma_keys_field_name = ground_truth_lemma_keys_field_name
         self._copy_field_names_from_record_to_entity = copy_field_names_from_record_to_entity
         self._return_entity_subwords_avg_vector = return_entity_subwords_avg_vector
+        self._normalize_embeddings = normalize_embeddings
+        self._weighted_average_entity_embeddings_and_sentence_embedding = weighted_average_entity_embeddings_and_sentence_embedding
         self._excludes = set() if excludes is None else excludes
 
         if is_trainset:
@@ -158,6 +162,33 @@ class WSDTaskDataset(IterableDataset):
 
             yield obj_entity
 
+    def _weighed_average_on_entity_embeddings(self, entity_embeddings: List[np.ndarray],
+                                              context_embeddings: np.ndarray, weight_alpha: float) -> List[np.ndarray]:
+        """
+        calculate weighted average over entity embeddings and sentence embedding (=simple average over context embeddings)
+
+        @param entity_embeddings: list of the sequence of subword embeddings of the entities. shape: List[(n_window, n_dim)]
+        @param context_embeddings: sequence of subword embeddings of a sentence. shape: (n_seq_len, n_dim)
+        @param weight_alpha: weight parameter. result = (1.0 - weight_alpha) * entity_embedding + weight_alpha * sentence_embedding
+        @return:
+        """
+        if weight_alpha == 0.0:
+            return entity_embeddings
+
+        lst_new_embeddings = []
+        # sentence_embedding: (n_dim,)
+        sentence_embedding = context_embeddings.mean(axis=0)
+        for entity_embedding in entity_embeddings:
+            if weight_alpha == 1.0:
+                # completely replace all subword embs with sentence embedding.
+                n_window = entity_embedding.shape[0]
+                new_embedding = np.repeat(sentence_embedding.reshape(1,-1), n_window, axis=0)
+            else:
+                new_embedding = (1.0 - weight_alpha) * entity_embedding + weight_alpha * sentence_embedding
+            lst_new_embeddings.append(new_embedding)
+
+        return lst_new_embeddings
+
     def _sentence_loader(self) -> Iterator[Dict[str, Any]]:
         """
         returns sentence-level objects.
@@ -174,6 +205,7 @@ class WSDTaskDataset(IterableDataset):
             lst_lst_entity_spans = self.extract_entity_spans_from_record(record,
                                                                          entity_field_name=self._record_entity_field_name,
                                                                          span_field_name=self._record_entity_span_field_name)
+            # keys: embeddings, sequence_lengths
             dict_entity_embeddings = extract_entity_subword_embeddings(
                                      context_embeddings=obj_sentence["embedding"],
                                      lst_lst_entity_subword_spans=lst_lst_entity_spans,
@@ -185,6 +217,18 @@ class WSDTaskDataset(IterableDataset):
                 obj_sentence["entity_span_avg_vectors"] = calc_entity_subwords_average_vectors(
                                                             context_embeddings=obj_sentence["embedding"],
                                                             lst_lst_entity_subword_spans=lst_lst_entity_spans)
+            # (optional) weighted average over entity embeddings and sentence embedding
+            obj_sentence["entity_embeddings"] = self._weighed_average_on_entity_embeddings(
+                                                            entity_embeddings=obj_sentence["entity_embeddings"],
+                                                            context_embeddings=obj_sentence["embedding"],
+                                                            weight_alpha=self._weighted_average_entity_embeddings_and_sentence_embedding
+                                                        )
+            # (optional) normalize embeddings
+            if self._normalize_embeddings:
+                obj_sentence["entity_embeddings"] = list(map(utils.l2_norm, obj_sentence["entity_embeddings"]))
+                obj_sentence["embedding"] = utils.l2_norm(obj_sentence["embedding"])
+                if self._return_entity_subwords_avg_vector:
+                    obj_sentence["entity_span_avg_vectors"] = list(map(utils.l2_norm, obj_sentence["entity_span_avg_vectors"]))
 
             yield obj_sentence
 

@@ -169,3 +169,14 @@ def create_sequence_mask(lst_sequence_lengths: List[int], max_sequence_length: O
         seq_mask[seq_idx, :seq_len] = False
 
     return seq_mask
+
+def l2_norm(embeddings: Array_like, axis=-1, eps=1E-15) -> Union[np.ndarray, torch.Tensor]:
+    is_input_tensor = torch.is_tensor(embeddings)
+    embeddings = tensor_to_numpy(embeddings)
+
+    l2_norm = np.linalg.norm(embeddings, ord=2, axis=axis, keepdims=True)
+    embeddings = embeddings / (l2_norm + eps)
+    if is_input_tensor:
+        embeddings = numpy_to_tensor(embeddings)
+
+    return embeddings
