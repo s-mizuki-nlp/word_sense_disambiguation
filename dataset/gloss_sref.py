@@ -137,7 +137,7 @@ class WordNetGlossDataset(Dataset):
             # concat synset examples from WordNet.
             # sentences are re-tokenized using word_tokenize() function.
             raw_examples = ' '.join(synset.examples())
-            separator = ' ' if len(tokenized_examples) > 0 else ''
+            separator = ' ' if len(raw_examples) > 0 else ''
             tokenized_examples += separator + ' '.join( word_tokenize(raw_examples) )
             # for each lemma; append all lemmas, definition sentence and example sentences (may include augmented corpora)
             for lemma in lst_lemmas:
