@@ -17,9 +17,8 @@ DIR_EVALSET_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/
 DIR_TRAINSET = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Training_Corpora/"
 DIR_TRAINSET_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/WSD_Training_Corpora/SemCor/bert_embeddings/"
 DIR_WORDNET_GLOSS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_corpus/"
-DIR_WORDNET_GLOSS_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_corpus/bert_embeddings/"
+DIR_WORDNET_GLOSS_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_corpus/SREF/bert_embeddings/"
 DIR_EXT_WORDNET_GLOSS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_augmentation/"
-DIR_EXT_WORDNET_GLOSS_EMBEDDINGS = "/home/sakae/Windows/dataset/word_sense_disambiguation/wordnet_gloss_augmentation/bert_embeddings/"
 DIR_TRAIN_UNSUPERVISED_LOCAL = "/tmp/sakae/"
 
 # evaluation dataset for all-words WSD task
@@ -138,7 +137,7 @@ cfg_training = {
     "Extended-WordNet-Gloss-noun-verb-bert-large-cased": {
         "path": pick_first_available_path(
             os.path.join(DIR_TRAIN_UNSUPERVISED_LOCAL, "bert-large-cased_Extended-WordNet-Gloss-noun-verb.hdf5"),
-            os.path.join(DIR_EXT_WORDNET_GLOSS_EMBEDDINGS, "bert-large-cased_Extended-WordNet-Gloss-noun-verb.hdf5")
+            os.path.join(DIR_WORDNET_GLOSS_EMBEDDINGS, "bert-large-cased_Extended-WordNet-Gloss-noun-verb.hdf5")
         ),
         "padding": False,
         "max_sequence_length": None,
