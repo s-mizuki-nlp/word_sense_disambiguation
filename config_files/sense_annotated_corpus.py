@@ -113,27 +113,18 @@ cfg_training = {
         "description": "WSD SemCor corpora (excluding no-sense-annotated sentences) encoded by BERT-large-cased. selects noun and verb entity only."
     },
     "WordNet-Gloss-noun-verb": {
-        "lst_path_gloss_corpus": [
-            os.path.join(DIR_WORDNET_GLOSS, "WordNet-3.0/glosstag/merged/noun.xml"),
-            os.path.join(DIR_WORDNET_GLOSS, "WordNet-3.0/glosstag/merged/verb.xml")
-        ],
-        "concat_hypernym_definition_sentence": False,
-        "description": "Automatically annotated WordNet Gloss corpus for noun and verb."
-    },
-    "WordNet-Gloss-Augmented-noun-verb": {
-        "lst_path_gloss_corpus": [
-            os.path.join(DIR_WORDNET_GLOSS, "WordNet-3.0/glosstag/merged/noun.xml"),
-            os.path.join(DIR_WORDNET_GLOSS, "WordNet-3.0/glosstag/merged/verb.xml")
-        ],
-        "concat_hypernym_definition_sentence": True,
-        "description": "Automatically annotated WordNet Gloss corpus augmented using the definition sentence of hypernym. noun and verb."
+        "target_pos": ["n","v"],
+        "concat_extended_examples": False,
+        "description": "Automatically annotated WordNet Gloss corpus for noun and verb. compatible with: [Wang and Wang, EMNLP2020]"
     },
     "Extended-WordNet-Gloss-noun-verb": {
-        "lst_path_gloss_corpus": [
+        "target_pos": ["n","v"],
+        "concat_extended_examples": True,
+        "lst_path_extended_examples_corpus": [
             os.path.join(DIR_EXT_WORDNET_GLOSS, "sentence_dict_n"),
-            os.path.join(DIR_EXT_WORDNET_GLOSS, "sentence_dict_n")
+            os.path.join(DIR_EXT_WORDNET_GLOSS, "sentence_dict_v")
         ],
-        "description": "WordNet Gloss Corpus which is extended using Baidu translation. Used in [Wang and Wang, EMNLP2020]. for noun and verb."
+        "description": "Extended WordNet Gloss corpus using extended examples from [Wang and Wang, EMNLP2020]. noun and verb. ref"
     },
     "WordNet-Gloss-noun-verb-bert-large-cased": {
         "path": pick_first_available_path(
@@ -143,15 +134,6 @@ cfg_training = {
         "padding": False,
         "max_sequence_length": None,
         "description": "WordNet Gloss corpora encoded by BERT-large-cased."
-    },
-    "WordNet-Gloss-Augmented-noun-verb-bert-large-cased": {
-        "path": pick_first_available_path(
-            os.path.join(DIR_TRAIN_UNSUPERVISED_LOCAL, "bert-large-cased_WordNet-Gloss-Augmented-noun-verb.hdf5"),
-            os.path.join(DIR_WORDNET_GLOSS_EMBEDDINGS, "bert-large-cased_WordNet-Gloss-Augmented-noun-verb.hdf5")
-        ),
-        "padding": False,
-        "max_sequence_length": None,
-        "description": "WordNet Gloss augmented using hypernym def. sentences corpora encoded by BERT-large-cased."
     },
     "Extended-WordNet-Gloss-noun-verb-bert-large-cased": {
         "path": pick_first_available_path(
