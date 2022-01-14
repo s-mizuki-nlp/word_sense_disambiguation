@@ -9,6 +9,9 @@ from dataset import WSDTaskDataset, WSDTaskDatasetCollateFunction
 from dataset.lexical_knowledge import LemmaDataset, SynsetDataset
 from dataset.contextualized_embeddings import BERTEmbeddingsDataset
 
+USE_ENTITY_EMBEDDING = 0.0
+USE_SENTENCE_EMBEDDING = 1.0
+
 
 def CreateWSDTaskDataset(cfg_bert_embeddings: Union[Dict[str, Any], List[Dict[str, Any]]],
                          cfg_lemmas: Dict[str, Any] = None,
@@ -88,6 +91,8 @@ cfg_task_dataset = {
         "ground_truth_lemma_keys_field_name":"ground_truth_lemma_keys",
         "copy_field_names_from_record_to_entity":None,
         "return_entity_subwords_avg_vector":True,
-        "raise_error_on_unknown_lemma":True
+        "raise_error_on_unknown_lemma":True,
+        "weighted_average_entity_embeddings_and_sentence_embedding":USE_ENTITY_EMBEDDING,
+        "normalize_embeddings":False
     }
 }
