@@ -45,6 +45,67 @@ class BERTEmbeddings(object):
         else:
             self._device = torch.device("cpu")
 
+    def weighted_average_masked_word_embeddings(self,
+                                                mat_embeddings_orig: np.ndarray,
+                                                mat_embeddings_masked: np.ndarray,
+                                                lst_lst_entity_spans_orig: List[List[Tuple[int,int]]],
+                                                lst_lst_entity_spans_masked: List[List[Tuple[int,int]]],
+                                                alpha: float
+                                                ) -> np.ndarray:
+        mat_mwe = mat_embeddings_orig.copy()
+        # iterate over entities
+        for lst_entity_spans, lst_masked_entity_spans in zip(lst_lst_entity_spans_orig, lst_lst_entity_spans_masked):
+            # iterate over words in entity:
+            for entity_word_span, masked_entity_word_span in zip(lst_entity_spans, lst_masked_entity_spans):
+                # mat_subword_embeddings: (n_subwords, n_dim)
+                mat_subword_embeddings = mat_embeddings_orig[slice(*entity_word_span),:]
+                # vec_masked_word_embedding: (1, n_dim)
+                vec_masked_word_embedding = mat_embeddings_masked[slice(*masked_entity_word_span),:]
+                assert vec_masked_word_embedding.shape[0] == 1, f"[MASK] seems to be split into subwords?"
+
+                # entity subword embeddings will be averaged over original embeddings and masked embedding.
+                mat_mwe[slice(*entity_word_span)] = (1.0 - alpha) * mat_subword_embeddings + alpha * vec_masked_word_embedding
+
+        return mat_mwe
+
+    def batch_weighted_average_masked_word_embeddings(self,
+                                                mat_embeddings_orig: np.ndarray,
+                                                mat_embeddings_masked: np.ndarray,
+                                                lst_sequence_spans_orig: np.ndarray,
+                                                lst_sequence_spans_masked: np.ndarray,
+                                                lst_lst_lst_entity_spans_orig: List[List[List[Tuple[int,int]]]],
+                                                lst_lst_lst_entity_spans_masked: List[List[List[Tuple[int,int]]]],
+                                                alpha: float
+                                                ) -> np.ndarray:
+        """
+        calculate weighted average over entity subword embeddings between original embeddings and masked word embeddings.
+
+        @param mat_embeddings_orig: stacked subword embeddings of the sentences in mini-batch.
+        @param mat_embeddings_masked: subword embeddings but applied masking.
+        @param lst_sequence_spans_orig: list of sequence spans of subword embedding for each sentence.
+        @param lst_sequence_spans_masked: sequence spans but applied masking.
+        @param lst_lst_lst_entity_spans_orig: subword spans of the words in the entities.
+        @param lst_lst_lst_entity_spans_masked: subword spans but applied masking.
+        @param alpha: averaging weight. 0.0 = use original embedding, 1.0 = use masked embedding.
+        @return: weighted average between original embeddings and masked word embeddings.
+        """
+        mat_mwe = mat_embeddings_orig.copy()
+        # iterate over sentences
+        it_record_pairs = zip(lst_sequence_spans_orig, lst_sequence_spans_masked, lst_lst_lst_entity_spans_orig, lst_lst_lst_entity_spans_masked)
+        for seq_span_orig, seq_span_masked, lst_lst_entity_spans_orig, lst_lst_entity_spans_masked in it_record_pairs:
+            mat_embeddings_orig_s = mat_embeddings_orig[slice(*seq_span_orig),:]
+            mat_embeddings_masked_s = mat_embeddings_masked[slice(*seq_span_masked),:]
+            mat_mwe_s = self.weighted_average_masked_word_embeddings(
+                mat_embeddings_orig=mat_embeddings_orig_s,
+                mat_embeddings_masked=mat_embeddings_masked_s,
+                lst_lst_entity_spans_orig=lst_lst_entity_spans_orig,
+                lst_lst_entity_spans_masked=lst_lst_entity_spans_masked,
+                alpha=alpha
+            )
+            mat_mwe[slice(*seq_span_orig),:] = mat_mwe_s
+
+        return mat_mwe
+
     def tokenize(self, lst_lst_words, add_special_tokens: bool, **kwargs) -> BatchEncoding:
 
         # encode word sequences
@@ -156,6 +217,10 @@ class BERTEmbeddings(object):
             "attention_mask": attention_mask
         }
         return dict_ret
+
+    @property
+    def tokenizer(self):
+        return self._tokenizer
 
 
 def convert_compressed_format_to_list_of_tensors(embeddings: Array_like,
