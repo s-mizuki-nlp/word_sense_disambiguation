@@ -12,7 +12,7 @@ from nltk.corpus import wordnet as wn
 import Levenshtein
 
 from torch.utils.data import Dataset
-from dataset_preprocessor import utils_wordnet, utils_wordnet_gloss
+from dataset_preprocessor import utils_wordnet
 
 
 class WordNetGlossDataset(Dataset):
