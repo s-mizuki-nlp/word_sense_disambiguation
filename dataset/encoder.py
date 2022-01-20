@@ -76,12 +76,17 @@ class BERTEmbeddings(object):
                                                                  lst_lst_entity_spans_masked: List[List[Tuple[int,int]]],
                                                                  alpha: float
                                                                  ) -> np.ndarray:
+        set_processed_span = set()
         mat_mwe = mat_embeddings_orig.copy()
         # iterate over entities
         for lst_entity_spans, lst_masked_entity_spans, sequence_span in zip(lst_lst_entity_spans_orig, lst_lst_entity_spans_masked, lst_sequence_spans):
+            assert tuple(sequence_span) not in set_processed_span, f"found duplicate entity spans: {sequence_span}"
+            set_processed_span.add(tuple(sequence_span))
+
             mat_embeddings_masked_e = mat_embeddings_masked_stacked[slice(*sequence_span),:]
 
             # iterate over words in entity:
+            assert len(lst_entity_spans) == len(lst_masked_entity_spans), f"number of words in the entity mismatch."
             for entity_word_span, masked_entity_word_span in zip(lst_entity_spans, lst_masked_entity_spans):
                 # mat_subword_embeddings: (n_subwords, n_dim)
                 mat_subword_embeddings = mat_embeddings_orig[slice(*entity_word_span),:]
