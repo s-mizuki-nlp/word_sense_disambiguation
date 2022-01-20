@@ -87,8 +87,14 @@ Noun and verb entity only. encoded by BERT-large-cased."""
         "filter_function":None,
         "description": "WSD Evaluation Framework dataset [Raganato+, 2017] encoded by BERT-large-cased. Weighted avg between entity embeddigns and masked word embeddings."
     },
+    "WSDEval-noun-verb-mwe-0.5-bert-large-cased": {
+        "path":os.path.join(DIR_EVALSET_EMBEDDINGS, "bert-large-cased_WSDEval-noun-verb_mwe-0.5.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "filter_function":None,
+        "description": "WSD Evaluation Framework dataset [Raganato+, 2017]: Noun and verb entity only, encoded by BERT-large-cased. Weighted avg between entity embeddigns and masked word embeddings."
+    },
 }
-
 
 cfg_training = {
     "SemCor": {
