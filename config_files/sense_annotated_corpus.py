@@ -80,6 +80,13 @@ cfg_evaluation = {
         "description": """WSD Evaluation Framework dataset [Raganato+, 2017]: Concatenates both before and after two sentences in the same document.\n
 Noun and verb entity only. encoded by BERT-large-cased."""
     },
+    "WSDEval-ALL-mwe0.5-bert-large-cased": {
+        "path":os.path.join(DIR_EVALSET_EMBEDDINGS, "bert-large-cased_WSDEval-ALL_mwe-0.5.hdf5"),
+        "padding": False,
+        "max_sequence_length": None,
+        "filter_function":None,
+        "description": "WSD Evaluation Framework dataset [Raganato+, 2017] encoded by BERT-large-cased. Weighted avg between entity embeddigns and masked word embeddings."
+    },
 }
 
 
@@ -142,5 +149,14 @@ cfg_training = {
         "padding": False,
         "max_sequence_length": None,
         "description": "Extended WordNet Gloss corpora encoded by BERT-large-cased."
+    },
+    "Extended-WordNet-Gloss-noun-verb-mwe0.5-bert-large-cased": {
+        "path": pick_first_available_path(
+            os.path.join(DIR_TRAIN_UNSUPERVISED_LOCAL, "bert-large-cased_Extended-WordNet-Gloss-noun-verb_mwe-0.5.hdf5"),
+            os.path.join(DIR_WORDNET_GLOSS_EMBEDDINGS, "bert-large-cased_Extended-WordNet-Gloss-noun-verb_mwe-0.5.hdf5")
+        ),
+        "padding": False,
+        "max_sequence_length": None,
+        "description": "Extended WordNet Gloss corpora encoded by BERT-large-cased. Weighted avg between entity embeddigns and masked word embeddings."
     },
 }
