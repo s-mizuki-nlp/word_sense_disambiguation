@@ -68,6 +68,32 @@ class BERTEmbeddings(object):
 
         return mat_mwe
 
+    def weighted_average_masked_word_embeddings_on_each_entities(self,
+                                                                 mat_embeddings_orig: np.ndarray,
+                                                                 mat_embeddings_masked_stacked: np.ndarray,
+                                                                 lst_sequence_spans: np.ndarray,
+                                                                 lst_lst_entity_spans_orig: List[List[Tuple[int,int]]],
+                                                                 lst_lst_entity_spans_masked: List[List[Tuple[int,int]]],
+                                                                 alpha: float
+                                                                 ) -> np.ndarray:
+        mat_mwe = mat_embeddings_orig.copy()
+        # iterate over entities
+        for lst_entity_spans, lst_masked_entity_spans, sequence_span in zip(lst_lst_entity_spans_orig, lst_lst_entity_spans_masked, lst_sequence_spans):
+            mat_embeddings_masked_e = mat_embeddings_masked_stacked[slice(*sequence_span),:]
+
+            # iterate over words in entity:
+            for entity_word_span, masked_entity_word_span in zip(lst_entity_spans, lst_masked_entity_spans):
+                # mat_subword_embeddings: (n_subwords, n_dim)
+                mat_subword_embeddings = mat_embeddings_orig[slice(*entity_word_span),:]
+                # vec_masked_word_embedding: (1, n_dim)
+                vec_masked_word_embedding = mat_embeddings_masked_e[slice(*masked_entity_word_span),:]
+                assert vec_masked_word_embedding.shape[0] == 1, f"[MASK] seems to be split into subwords?"
+
+                # entity subword embeddings will be averaged over original embeddings and masked embedding.
+                mat_mwe[slice(*entity_word_span)] = (1.0 - alpha) * mat_subword_embeddings + alpha * vec_masked_word_embedding
+
+        return mat_mwe
+
     def batch_weighted_average_masked_word_embeddings(self,
                                                 mat_embeddings_orig: np.ndarray,
                                                 mat_embeddings_masked: np.ndarray,
