@@ -60,8 +60,8 @@ class BERTEmbeddings(object):
                 # mat_subword_embeddings: (n_subwords, n_dim)
                 mat_subword_embeddings = mat_embeddings_orig[slice(*entity_word_span),:]
                 # vec_masked_word_embedding: (1, n_dim)
-                vec_masked_word_embedding = mat_embeddings_masked[slice(*masked_entity_word_span),:]
-                assert vec_masked_word_embedding.shape[0] == 1, f"[MASK] seems to be split into subwords?"
+                vec_masked_word_embedding = mat_embeddings_masked[slice(*masked_entity_word_span),:].mean(axis=0, keepdims=True)
+                # assert vec_masked_word_embedding.shape[0] == 1, f"[MASK] seems to be split into subwords?"
 
                 # entity subword embeddings will be averaged over original embeddings and masked embedding.
                 mat_mwe[slice(*entity_word_span)] = (1.0 - alpha) * mat_subword_embeddings + alpha * vec_masked_word_embedding
@@ -86,8 +86,8 @@ class BERTEmbeddings(object):
                 # mat_subword_embeddings: (n_subwords, n_dim)
                 mat_subword_embeddings = mat_embeddings_orig[slice(*entity_word_span),:]
                 # vec_masked_word_embedding: (1, n_dim)
-                vec_masked_word_embedding = mat_embeddings_masked_e[slice(*masked_entity_word_span),:]
-                assert vec_masked_word_embedding.shape[0] == 1, f"[MASK] seems to be split into subwords?"
+                vec_masked_word_embedding = mat_embeddings_masked_e[slice(*masked_entity_word_span),:].mean(axis=0, keepdims=True)
+                # assert vec_masked_word_embedding.shape[0] == 1, f"[MASK] seems to be split into subwords?"
 
                 # entity subword embeddings will be averaged over original embeddings and masked embedding.
                 mat_mwe[slice(*entity_word_span)] = (1.0 - alpha) * mat_subword_embeddings + alpha * vec_masked_word_embedding
